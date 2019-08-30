@@ -1,0 +1,74 @@
+---
+title: "makeDriftingProbs"
+author: "Paul A. Bloom"
+date: "January 20, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+Editing Bradley Doll's [function](https://github.com/dollbb/estRLParam/blob/master/Rcode/makeDrifts.R) to generate 4 independent random walks for 200 trials
+
+```{r}
+makeDrifts <- function(plotDrifts=TRUE, write=FALSE) {
+  # Make new reward probability drifts with reflecting boundaries of 0.25 and 0.75 for all 4 choices
+  # Only writes new file if write = TRUE
+
+    totaltrials = 200
+    
+    # set up dataframe for each of the 4 choices
+    payoff = data.frame(stateBchoice1 = rep(NA, totaltrials),
+                     stateBchoice2 = rep(NA, totaltrials),
+                     stateCchoice1 = rep(NA, totaltrials),
+                     stateCchoice2 = rep(NA, totaltrials))
+    
+    # starting payoffs
+    payoff[1,] = c(.7, .3, .4, .6)
+    
+    # random walk and assign payoff probability for each option for each trial
+    for (i in 2:totaltrials) {
+      prob = payoff[i-1,] + rnorm(4, mean=0, sd = 0.025)
+      prob[prob > 0.75] = 1.5 - prob[prob > 0.75]
+      prob[prob < 0.25] =  .5 - prob[prob < 0.25]
+      payoff[i,] <- prob
+    }
+    # add trialNum column
+    payoff = mutate(payoff, trialNum = 1:totaltrials)
+    
+    
+  # for writing to file  
+  if(write){
+    print('writing to file')  
+    write.csv(payoff, file = paste0('rewardProbabilities', Sys.Date(), '.csv'), row.names = FALSE)
+  }
+  else {
+    print('not writing to file')
+  }
+  # generate plot
+  if (plotDrifts) {
+    myplot = tidyr::gather(payoff, key = 'choice', value = 'rewardProbability', stateBchoice1:stateCchoice2) %>%
+      ggplot(., aes(x = trialNum, y = rewardProbability, color = choice)) + 
+      labs(title = paste0('Drifting Probabilities Generated ', Sys.time())) +
+      geom_line() + 
+      theme_bw()
+
+  } 
+  return(list(payoff, myplot))
+  
+}
+```
+
+# Check out an example randomization of the drifts
+
+```{r}
+drifts = makeDrifts(TRUE, TRUE)
+drifts[[2]]
+dat = drifts[[1]]
+datMean = mutate(dat, mean = (stateBchoice1 + stateBchoice2 + stateCchoice1 + stateCchoice2)/4)
+hist(datMean$mean)
+
+```
+
