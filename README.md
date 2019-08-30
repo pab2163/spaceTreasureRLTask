@@ -2,6 +2,7 @@
 
 
 Author: Paul A. Bloom
+
 Date: Jan 2 2019
 
 ### A reinforcement learning task built in pygame
