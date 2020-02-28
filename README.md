@@ -13,8 +13,8 @@ Task design based on [Daw et al., 2011](https://www.ncbi.nlm.nih.gov/pubmed/2143
 *	We have added animations, sounds, and music in attempts to 'gamify' the task and engage children for the task duration
 
 <p float="left">
-  <img src="/images/instructions/Slide01.jpg" width="100" />
-  <img src="/images/demoImg.png" width="100" /> 
+  <img src="/images/instructions/Slide01.jpg" width="200" />
+  <img src="/images/demoImg.png" width="200" /> 
 </p>
 
 ### To run the game: 
