@@ -1,3 +1,10 @@
+# This script runs the Space Treasure game (Daw 2-Stage task variant), pulling in custom functions and sound/image files
+# Paul A. Bloom
+# August 29, 2019
+
+## Built on pygame
+
+# Import libraries and custom functions
 import pygame
 import numpy as np
 import pandas as pd
@@ -13,24 +20,32 @@ from taskFunctions.portals import *
 from taskFunctions.aliens import *
 from os import path 
 
+# Define game class
+# Importantly: setting max FPS so it doesn't move to fast on very fast computers. 
 class Game:
     def __init__(self): #initialize game window and other things for the game.
         pygame.init()
         pygame.mixer.init()
         self.maxFPS = 40 
+
+        # Initialize participant ID as blank, this will get filled in 
         self.participantID = ''
 
         # Clock Stuff
+        # Set start time for a reference point, and also get day for output filename
         self.clock = pygame.time.Clock()
         self.now = datetime.datetime.now()
         self.currentDay = str(self.now.month) + '_' + str(self.now.day) +  '_' + str(self.now.year)
         self.startTime = self.now.strftime("%H:%M")
 
-        # Load lots of images!
+        # Set up game display
         self.gameDisplay = pygame.display.set_mode((display_width, display_height), pygame.FULLSCREEN)
         self.gameDisplay.fill(white)
         self.avatar = ''
         pygame.display.set_caption("SPACE TREASURE!!")
+
+        # Load lots of images!
+        # Resize when appropriate
         self.img_avatar=pygame.sprite.Sprite()
         self.img_avatar.image=pygame.image.load('images/pikachu.png').convert_alpha()
         self.img_avatar.image = pygame.transform.scale(self.img_avatar.image, (50, 60))
@@ -47,8 +62,6 @@ class Game:
         self.ladderLeft = pygame.image.load('images/ladderLeft.png').convert_alpha()
         self.ladderLeft = pygame.transform.scale(self.ladderLeft, (300, 350))
         self.ladderImage = pygame.transform.scale(self.ladderLeft, (200, 350))
-
-
         self.avatarChoiceScreen = pygame.image.load('images/avatarChoiceSlide.jpg').convert()
         self.avatarChoiceScreen  = pygame.transform.scale(self.avatarChoiceScreen, (display_width, display_height))
         self.smallerImage = pygame.transform.scale(self.avatarChoiceScreen, (display_width, display_height))
@@ -56,7 +69,7 @@ class Game:
         # Define sprites
         self.all_sprites = pygame.sprite.LayeredUpdates()
         self.coins = pygame.sprite.Group()
-        self.platforms = pygame.sprite.Group()
+        self.platforms = pygame.sprite.Group() # only 1 platform for ground here
         self.portals = pygame.sprite.Group()
         self.playerSprite=pygame.sprite.Group()
         self.playerSprite.add(self.img_avatar)
@@ -64,6 +77,8 @@ class Game:
         coins_obj = Coin(self)
         platform_obj=Platform(self)
         portals_obj = Portal(self)
+
+        # Get sprite images
         self.coins_images = coins_obj.getImages()
         self.platform_images=platform_obj.getImages()
         self.portals_images=portals_obj.getImages()
@@ -72,7 +87,6 @@ class Game:
         self.aliens = pygame.sprite.Group()
         aliens_obj = Alien(self)
         self.aliens_images = aliens_obj.getImages()
-
 
 
         # Initialize other global variables
@@ -113,15 +127,14 @@ class Game:
             cols = ['stateBchoice2','stateBchoice1','stateCchoice2','stateCchoice1','trialNum']
             self.rewardProbs = self.rewardProbs[cols]           
 
-        # From left to right (1 = most left, etc)
+        # From left to right (1 = most left, etc) define alien reward probability column names
         self.rewardProbs.columns = ['alien1Prob', 'alien2Prob', 'alien3Prob', 'alien4Prob', 'trialNum']
         print(colRandomizer)
         print(self.rewardProbs.head())
 
-
+    # Loads sound and image data
     def load_data(self):
         self.dir = path.dirname(__file__)
-
 
         # load coin pile image
         self.coinPile =pygame.image.load('images/coinPile.png').convert_alpha()
@@ -163,8 +176,10 @@ class Game:
         self.reminderImages =  [pygame.image.load('images/reminders/Slide06.jpg').convert(),
                                  pygame.image.load('images/reminders/Slide07.jpg').convert()]                    
 
-    # Makes a vector of transitions predetermined before task starts
+    # Returns a vector of transitions predetermined before task starts for nTrials trials (200 in our case)
     # 1 = common, 0 = rare
+    # Each particint will always have exactly 70% common, 30% rare
+    # First 10 trials will also contain exactly 7 common, 3 rare
     def makeTransitions(self, nTrials):
         # First 10 trials: exactly 7 will be common, 3 will be rare
         first10Common = np.repeat(1,7)
@@ -181,23 +196,28 @@ class Game:
         allTrials = np.concatenate((first10, laterTrials), axis = 0)
         return(allTrials)
 
+    # Refreshes items on screen, background
+    # Order is important here, some things are refreshed and displayed conditionally depending on the stage of the task (i.e. ladders)
     def updateScreen(self, cur_background):
+
+        # Get time and update platforms, coins
         now_time=pygame.time.get_ticks()
         self.img_avatar.rect.midbottom = [self.pos.x, self.pos.y]
         self.platforms.update()
         self.coins.update()
         self.playerSprite.update( )
+
+        # Draw background first, then planets, then coins/platforms/portals/aliens
         self.gameDisplay.blit(self.background,(0,0))
         self.gameDisplay.blit(self.jupiter, (display_width/2 + 50, display_height/2 - 200))
         self.gameDisplay.blit(self.moon, (display_width/2 - 250, display_height/2 - 200))
-
         self.coins.draw(self.gameDisplay)
         self.platforms.draw(self.gameDisplay)
         self.portals.draw(self.gameDisplay)
         self.aliens.draw(self.gameDisplay)
 
 
-        # Ladder Display
+        # Ladder Display conditional on choice and transition
         if (self.ladderImage == self.ladderRight) or (self.ladderImage == self.ladderLeft):
             self.gameDisplay.blit(self.ladderImage, (display_width/2 - 150, display_height - 400))
         elif self.ladderImage == self.ladderStraight:
@@ -205,7 +225,10 @@ class Game:
                 self.gameDisplay.blit(self.ladderStraight, (display_width/2 + 110, display_height - 400))
             else:
                 self.gameDisplay.blit(self.ladderStraight, (display_width/2 - 160, display_height - 400))
+        # Draw sprite
         self.playerSprite.draw(self.gameDisplay)
+
+        # Draw score
         if self.greenScore:
            self.messageToScreen("SCORE : "+(str)(self.score), 50, black, display_width / 2 , 15, green) 
         elif self.redScore:
@@ -214,6 +237,8 @@ class Game:
             self.messageToScreen("SCORE : "+(str)(self.score), 50, white, display_width / 2 , 15, black) 
         pygame.display.update()
 
+    # Run game! 
+    # This is after avatar and participant ID selection
     def run(self):
         # check to make sure frameRate isn't too low
         #print(self.clock.get_fps())
@@ -258,23 +283,31 @@ class Game:
         reindexedRewardProbs.index = np.arange(1, len(reindexedRewardProbs) + 1)
         self.taskDataFrame = pd.concat([self.taskDataFrame, reindexedRewardProbs], axis = 1)
 
-        # Run the tasks!
+        # Run a block of the task!
         self.gameOver = False
         self.block()
-        # Save Kool Data
+
+        # End game and do post-questions
         pygame.mixer.music.fadeout(500)
         self.postQuestions()
+
+        # Timing to complete whole game
         finalTime = pygame.time.get_ticks()
         self.taskDataFrame['taskDuration'] = finalTime
 
+        # Write out data, whether quit early or complete (mark if incomplete in file name)
         if self.gameExit:
             self.taskDataFrame.to_csv('../data/%s_incomplete_%s.csv'%(self.participantID, self.currentDay), index = False)
         else:
             self.taskDataFrame.to_csv('../data/%s_%s.csv'%(self.participantID, self.currentDay), index = False)
+        
+        # Quit
         pygame.quit()
         quit()
 
+    # Run the task! Including practice
     def block(self):
+        # Practice trials! Slides/advancing contingent on spacebar presses
         self.img_avatar.rect.midbottom = [self.pos.x, self.pos.y]
         now_time=pygame.time.get_ticks()
         self.playerSprite.update( )
@@ -322,6 +355,8 @@ class Game:
         self.waitForSpace() 
         self.ray.play()
         pygame.mixer.music.play(loops=-1)
+
+        # Actually run all trials of the task in loop
         for trial in range(1, self.numTrials + 1):
             if trial == 6:
                 self.ruleReminder()
@@ -334,6 +369,7 @@ class Game:
                     self.takeABreak()                
         self.pos = vec(display_width/2 - 15, display_height)
 
+    # Function for stage 1 of each trial (portal selection)
     def stage1(self, trial):
         self.alienSprites[0].getAlien(10, 100, self.aliens_images, 0, 100)
         self.alienSprites[1].getAlien(100, 100, self.aliens_images, 1, 100)
@@ -414,6 +450,7 @@ class Game:
                     stage2Type = 2
                 self.stage2(trial,stage2Type, rightPortalColor)            
 
+    # Function for getting participant choice at stage1
     def getAction1(self, trial, practice):
         self.acc=vec(0,gravity)
         pygame.event.clear()
@@ -441,6 +478,7 @@ class Game:
                     reminded = True
         self.taskDataFrame.loc[trial, 'rtStage1'] = pygame.time.get_ticks() - beginWait
 
+    # Function for stage 2 (alien choice at planets)
     def stage2(self, trial, stage2Type, portalColor):
         #print("stage2type" + str(stage2Type))
         # Update data
@@ -534,7 +572,7 @@ class Game:
         self.coins.empty()
         self.portals.empty()        
 
-
+    # Function to get participant action at stage 2
     def getAction2(self, trial):
         pygame.event.clear()
         beginWait = pygame.time.get_ticks()
@@ -561,7 +599,7 @@ class Game:
         self.taskDataFrame.loc[trial, 'rtStage2'] = pygame.time.get_ticks() - beginWait
 
 
-
+    # Control movement of participnat to alien depending on stage2 choice
     def choice2Movement(self, trial, stage2Type):
         # Movement of avatar to alien
         if self.keyname == 'l':
@@ -576,6 +614,7 @@ class Game:
             self.updateScreen(self.background)
         self.taskDataFrame.loc[trial, 'choiceSideStage2'] = self.keyname
 
+    # Outcome of participant's choice at stage 2 (reward vs. no reward)
     def stage2Outcome(self, trial, stage2Type):
         self.rewardVec = self.rewardProbs.iloc[trial-1, 0:4]
 
@@ -623,7 +662,7 @@ class Game:
         else:   
             self.noReward(trial, alien2Move)
 
-    
+    # Reward animation and scoring    
     def reward(self, trial, alien2Move):
         self.whee.play()
         for i in range(1,9):
@@ -641,7 +680,7 @@ class Game:
         if (self.score % 20 == 0) and (self.score != self.bestLevel):
             self.levelUp()
 
-
+    # No reward animation
     def noReward(self, trial, alien2Move):
         prevX = alien2Move.rect.x 
         self.lossSound.play()
@@ -652,6 +691,7 @@ class Game:
             self.updateScreen(self.background)
         alien2Move.rect.x = prevX
 
+    # Level up at intervals of 20 points!
     def levelUp(self):
         self.levelUp_sound.play()
         self.gameDisplay.blit(self.background,(0,0))
@@ -663,7 +703,7 @@ class Game:
         pygame.time.wait(2000)
         self.levelUps = self.levelUps + 1
 
-
+    # Helper function for printing a message to the game screen
     def messageToScreen(self,msg,size, color, x, y, rect_color):
         font=pygame.font.Font(self.font_name,size)
         text_surface=font.render(msg,True,color)
@@ -672,6 +712,7 @@ class Game:
         pygame.draw.rect(self.gameDisplay, rect_color, (text_rect.left - 20, text_rect.top - 20, text_rect.width + 40, text_rect.height + 40))
         self.gameDisplay.blit(text_surface,text_rect)
 
+    # Initiall screen participant see in demo
     def startScreen(self):
         self.getParticipantID()
         slideImage= pygame.transform.scale(self.introSlideImages[0], (display_width, display_height))
@@ -692,6 +733,7 @@ class Game:
         self.waitForSpace()
         g.run()
 
+    # Check for low FPS to ensure smooth gameplay
     def lowFPS(self, frames):
         self.gameDisplay.fill(orange)
         self.messageToScreen(("WARNING!!, low refresh rate of only " + str(frames) + " frames/second"),25,white,display_width/2,display_height/2, black)
@@ -699,6 +741,7 @@ class Game:
         pygame.display.update()
         pygame.time.wait(5000)
 
+    # Show demo slides
     def showIntroSlides(self):
         for i in range(1,2):
             self.rocket.play()
@@ -709,6 +752,7 @@ class Game:
         self.waitForSpace()
         pygame.display.update()
 
+    # Get participand ID before starting game
     def getParticipantID(self):
         textinput = TextInput(self)
         while True:
@@ -731,6 +775,7 @@ class Game:
                 self.participantID = textinput.get_text().replace(" ", "")
                 break
 
+    # At the end of the game, get the participant's self-reported strategy (experimenter types)
     def getStrategyResponse(self):
         self.strategy = ''
         textinput = StrategyTextInput(self)
@@ -757,7 +802,7 @@ class Game:
                 self.taskDataFrame['strategyResponse'] = self.strategy
                 break
 
-
+    # Halfway through the task, participant gets a break
     def takeABreak(self):
         self.powerup.play()
         self.gameDisplay.blit(self.background,(0,0))
@@ -778,12 +823,14 @@ class Game:
                     self.gameOver=False
                     self.gameExit=False
 
-
+    # Print reminder to participant to choose faster
     def speedReminder(self):
         self.messageToScreen(("Please choose faster!"),50,white,display_width/2,self.pos.y - 300, red)
         pygame.display.update()
         self.error_sound.play()
 
+    # Runs post-questions after finishing all 200 trials
+    # Questions ask for explicit recognition of task structure
     def postQuestions(self):
         leftPortalColor = 0
         rightPortalColor = 1
@@ -829,6 +876,7 @@ class Game:
                 self.taskDataFrame['greenPortalDest'] = 'l'
             self.waitForSpace()
 
+    # Get responses to post questions
     def getPostQuestionResponse(self):
         waiting=True
         while waiting:
@@ -850,7 +898,7 @@ class Game:
                         self.gameExit=False
 
 
-
+    # Congratulate participant for finishing game!
     def congratsScreen(self):
         self.powerup.play()
         self.gameDisplay.blit(self.background,(0,0))
@@ -862,6 +910,7 @@ class Game:
         self.waitForKeyPress()
         pygame.display.update()
 
+    # Let participant choose game avatar at the beginning of the task
     def chooseAvatar(self):
         self.ray.play()
         self.avatar = 'undeclared'
@@ -889,6 +938,7 @@ class Game:
                         self.gameExit=False
         self.powerup.play()
 
+    # Five trials in, give reminder of rules 
     def ruleReminder(self):
         self.ray.play()
         reminderImage= pygame.transform.scale(self.reminderImages[0], (display_width, display_height))
@@ -919,6 +969,7 @@ class Game:
         self.waitForSpace()
         self.portals.empty() 
 
+    # 2 practice trials before the task
     def practiceTrials(self, practiceTrial):
         self.rocket.play()
         self.ladderImage = self.coinPile
@@ -1082,6 +1133,7 @@ class Game:
         self.coins.empty()
         self.portals.empty()        
 
+    # Helper function to wait for a key press (any key)
     def waitForKeyPress(self):
         waiting=True
         while waiting:
@@ -1095,7 +1147,7 @@ class Game:
                     self.gameOver=False
                     self.gameExit=False
 
-
+    # Helper function to wait until spacebar is pressed
     def waitForSpace(self):
         waiting=True
         while waiting:
@@ -1114,5 +1166,6 @@ class Game:
                         waiting=False
                         self.gameExit=True
 
+# Create an instance of game, and start!
 g=Game()
 g.startScreen()
