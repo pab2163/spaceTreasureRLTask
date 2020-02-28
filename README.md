@@ -12,8 +12,10 @@ Task design based on [Daw et al., 2011](https://www.ncbi.nlm.nih.gov/pubmed/2143
 *	Trials are fast, such that most participants complete the task in roughly 10 minutes
 *	We have added animations, sounds, and music in attempts to 'gamify' the task and engage children for the task duration
 
-![](images/instructions/Slide01.jpg) ![](images/demoImg.png)
-
+<p float="left">
+  <img src="/images/instructions/Slide01.jpg" width="100" />
+  <img src="/images/demoImg.png" width="100" /> 
+</p>
 
 ### To run the game: 
 
