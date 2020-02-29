@@ -1,3 +1,5 @@
+# Portal Class (stage 1 choices)
+
 import pygame
 import sys
 sys.path.append('..')
@@ -17,6 +19,7 @@ class Portal(pygame.sprite.Sprite):
         self.rect.x=x
         self.rect.y=y
 
+    # Load in portal image
     def getImages(self):
         green = 'images/greenPortal.png'
         yellow = 'images/yellowPortal.png'
@@ -26,10 +29,10 @@ class Portal(pygame.sprite.Sprite):
         purple = 'images/purplePortal.png'
         self.practiceColorVec = [red, purple]
 
-        # Shuffle the portal colors so different participants have different combinations of color choices
+        # Shuffle the portal colors so different participants have different combinations of color choices for both task and practice
         shuffle(self.colorVec)
         self.images = [pygame.image.load(self.colorVec[0]).convert_alpha(),
                        pygame.image.load(self.colorVec[1]).convert_alpha(),
                        pygame.image.load(self.practiceColorVec[0]).convert_alpha(),
-                       pygame.image.load(self.practiceColorVec[1]).convert_alpha()] 
+                       pygame.image.load(self.practiceColorVec[1]).convert_alpha()]
         return self.images

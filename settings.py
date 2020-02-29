@@ -1,3 +1,5 @@
+# Settings files for colors, display attributes and aesthetics, fonts
+
 white=(255,255,255)
 black=(0,0,0)
 red=(200,0,0)

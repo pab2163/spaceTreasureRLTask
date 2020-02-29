@@ -1,3 +1,5 @@
+# Bottom platform
+
 import pygame
 from settings import *
 import random

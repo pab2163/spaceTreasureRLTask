@@ -1,3 +1,5 @@
+# General platform class (not just bottom of stage)
+
 import pygame
 from settings import *
 from taskFunctions.spritesheets import *

@@ -1,3 +1,5 @@
+# Define coin class (for stage 2 rewards)
+
 import pygame
 from settings import *
 from taskFunctions.spritesheets import *
@@ -8,7 +10,7 @@ class Coin(pygame.sprite.Sprite):
         pygame.sprite.Sprite.__init__(self)
         self.game=game
 
-
+    # Create coin object
     def getCoin(self,x,y,images, imageNum):
         self.image = images[imageNum]
         self.image = pygame.transform.scale(images[imageNum], (45,45))
@@ -16,9 +18,8 @@ class Coin(pygame.sprite.Sprite):
         self.rect=self.image.get_rect()
         self.rect.x=x
         self.rect.y=y
-        #if randrange(100)<power_up_spawn_freq:
-        #    PowerUps(self,self.game)
 
+    # Get gold coin image from spitesheet
     def getImages(self):
         self.spritesheetsobj = SpriteSheet()
         self.images = [self.spritesheetsobj.imageLoad(698, 1931,84,84)] # coin_gold.png

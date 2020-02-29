@@ -1,3 +1,5 @@
+# Same as textInput.py, except includes code for text wrapping for writing out long strategy responses
+
 """
 Copyright 2017, Silas Gyger, silasgyger@gmail.com, All rights reserved.
 Borrowed from https://github.com/Nearoo/pygame-text-input under the MIT license.
@@ -7,7 +9,7 @@ import os.path
 import re
 import pygame
 import pygame.locals as pl
-import textwrap 
+import textwrap
 
 pygame.font.init()
 
