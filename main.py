@@ -20,6 +20,9 @@ from taskFunctions.portals import *
 from taskFunctions.aliens import *
 from os import path
 
+
+os.system('mkdir ../data')
+
 # Define game class
 # Importantly: setting max FPS so it doesn't move to fast on very fast computers.
 class Game:
@@ -35,7 +38,7 @@ class Game:
         # Set start time for a reference point, and also get day for output filename
         self.clock = pygame.time.Clock()
         self.now = datetime.datetime.now()
-        self.currentDay = str(self.now.month) + '_'\ + str(self.now.day) +  '_' + str(self.now.year)
+        self.currentDay = str(self.now.month) + '_' + str(self.now.day) +  '_' + str(self.now.year)
         self.startTime = self.now.strftime("%H:%M")
 
         # Set up game display
@@ -406,7 +409,6 @@ class Game:
             self.portalLeft.rect.y -= 10*np.sin(i*1.5)
             self.portalRight.rect.y -= 10*np.sin(i*1.5)
             self.updateScreen(self.background)
-
 
         self.getAction1(trial, practice = False)
 
