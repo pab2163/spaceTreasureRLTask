@@ -1,0 +1,289 @@
+---
+title: "Data Cleaning -- Space Treasure"
+author: "Paul A. Bloom"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readr)
+library(readxl)
+#library(R.matlab)
+```
+
+This script cleans and preps data for further modeling -- both for 1-trial-back analyses and full RL models. 
+
+
+# Load each subject's file in, then code stay/switch
+
+```{r, echo=FALSE}
+# read in file names from raw_data directory
+files = list.files(path= '../raw_data/danl/', pattern = '.csv', full.names = TRUE)
+
+# Load all files into 1 dataframe
+space_data = files %>% 
+    map_dfr(read_csv, col_types = cols(participantID= col_character()), .id = "source")
+
+# Remove data for false start participant
+space_data = dplyr::filter(space_data, !is.na(participantID))
+
+
+# Recode participantID to be standardized
+space_data = mutate(space_data,
+                  participantID = parse_number(gsub('_V2W2', '', participantID))) %>%
+  dplyr::filter(., !is.na(participantID))
+
+# Check that each run had all 200 trials completed
+participantN = space_data %>%
+  filter(., choicePortal == 0 | choicePortal == 1) %>%
+  dplyr::group_by(participantID) %>%
+  dplyr::summarise(n  = n())
+```
+
+# Remove extra columns
+```{r}
+space_data = dplyr::select(space_data, -startTime, -date, -source)
+```
+
+
+# Code previous transition, previous reward, and stay-switch 
+```{r}
+# for early subjects before task code was edited -- fill in trialNum using the X column
+space_data$trialNum = ifelse(is.na(space_data$trialNum), space_data$X, space_data$trialNum)
+
+```
+
+# Recode variables
+
+```{r}
+space_data = dplyr::select(space_data, 
+                           id = participantID, trial = trialNum,
+                           choice_1 = choicePortal,
+                           choice_2 = choiceStage2,
+                           reward, 
+                           transition = transitionType,
+                           rt_1 = rtStage1,
+                           rt_2 = rtStage2, 
+                           state = stage2Type,
+                           everything())
+
+space_data = mutate(space_data, choice_2 = ifelse(choice_2 %in% c(1,3), 0, 1),
+                    state = state-1)
+```
+
+
+# Use `lag` function to get columns for previous decisions
+
+```{r}
+space_data = space_data %>%
+  group_by(id) %>%
+   mutate(., last_transition = lag(transition),
+             last_reward = lag(reward),
+             last_choice_1 = lag(choice_1),
+             last_choice_2 = lag(choice_2),
+             stay1 = ifelse(choice_1 == last_choice_1, 1, 0),
+             stay2 = ifelse(choice_2 == last_choice_2, 1, 0)) %>%
+  ungroup() %>%
+  dplyr::mutate(state = case_when(
+    choice_1 == 0 & transition == 'common' ~ 'A',
+    choice_1 == 0 & transition == 'rare' ~ 'B',
+    choice_1 == 1 & transition == 'common' ~ 'B',
+    choice_1 == 1 & transition == 'rare' ~ 'A',
+  ))
+```
+
+# Filter data for only healthy comparison participants
+
+```{r}
+demog = read_excel('../rawDemog/MASTER_W2_20200417.xlsx')
+demog = dplyr::mutate(demog, participantID = parse_number(gsub('_V2', '', IDENT_SUBID))) %>%
+  dplyr::select(id = participantID, age = SUBAGE_Session2, group = GROUP)
+
+space_data = space_data %>%
+  left_join(., demog) %>%
+  dplyr::filter(group == 'C')
+
+
+space_data_for_rl_model = space_data %>%
+  dplyr::select(id, trial, choice_1, choice_2, reward, state) %>%
+  mutate(choice_2 = ifelse(state=='B', choice_2+3, choice_2+1),
+         choice_1 = choice_1 + 1)
+
+
+danl_choice_1_matrix = space_data_for_rl_model %>%
+  select(., id, choice_1, trial) %>%
+  tidyr::spread(., key = id, value = choice_1) %>%
+  select(., -trial) %>%
+  t()
+
+danl_choice_2_matrix = space_data_for_rl_model %>%
+  select(., id, choice_2, trial) %>%
+  tidyr::spread(., key = id, value = choice_2) %>%
+  select(., -trial) %>%
+  t()
+
+danl_reward_matrix = space_data_for_rl_model %>%
+  select(., id, reward, trial) %>%
+  tidyr::spread(., key = id, value = reward) %>%
+  select(., -trial) %>%
+  t()
+
+
+save(danl_choice_1_matrix, danl_choice_2_matrix, danl_reward_matrix, file = '../clean_data/danl_data_for_rl_model.rda')
+
+```
+
+
+# Write out cleaned data file
+```{r}
+write.csv(space_data, file = '../clean_data/danl_space_treasure_comps.csv', row.names = FALSE)
+```
+
+
+
+# Pull Hartley Lab Data Files
+
+
+No stage2 data here
+```{r}
+# decker = read_csv('https://raw.githubusercontent.com/hartleylabnyu/online_two_step_replication/master/analysis_code_and_data/data/decker/decker_data.dat')
+# decker_ages = read_csv('https://raw.githubusercontent.com/hartleylabnyu/online_two_step_replication/master/analysis_code_and_data/data/decker/decker_ages.csv') %>% 
+#   dplyr::select(subj = subject_id, everything())
+# decker = left_join(decker, decker_ages, by = c('subj'))
+# 
+# potter = read_csv('https://raw.githubusercontent.com/hartleylabnyu/online_two_step_replication/master/analysis_code_and_data/data/potter/potter_data.dat')
+# potter_ages = read_csv('https://raw.githubusercontent.com/hartleylabnyu/online_two_step_replication/master/analysis_code_and_data/data/potter/potter_ages.csv') %>%
+#   dplyr::select(subj = subject_id, everything())
+# potter = left_join(potter, potter_ages, by = c('subj'))
+
+```
+
+
+```{r}
+online = read_csv('https://raw.githubusercontent.com/hartleylabnyu/online_two_step_replication/master/analysis_code_and_data/data/online/online_mat_files/online_data_for_matlab.txt')
+
+online_ages = read_csv('https://raw.githubusercontent.com/hartleylabnyu/online_two_step_replication/master/analysis_code_and_data/data/online/mbmf_ages.csv')
+
+online = dplyr::left_join(online, online_ages, by = 'subject_id') %>%
+  dplyr::select(trial_num = trial, everything(), -practice_trial) %>%
+  dplyr::mutate(choice_1 = case_when(choice_1 == 2 ~ 1, choice_1 == 1 ~ 0, choice_1 == 0 ~ NA_real_),
+                choice_2 = case_when(choice_2 == 2 ~ 1, choice_2 == 1 ~ 0, choice_2 == 0 ~ NA_real_),
+                transition = case_when(
+                  choice_1 == 0 & state == 2 ~ 'common',
+                  choice_1 == 0 & state == 3 ~ 'rare',
+                  choice_1 == 1 & state == 3 ~ 'common',
+                  choice_1 == 1 & state == 2 ~ 'rare'),
+                cohort = 'online')
+
+
+# Decker data
+decker_ages = read_csv('https://raw.githubusercontent.com/pab2163/online_two_step_replication/master/analysis_code_and_data/data/decker/decker_ages.csv')
+
+decker = read_csv('https://raw.githubusercontent.com/pab2163/online_two_step_replication/master/analysis_code_and_data/data/decker/combined_decker_data.csv') %>%
+  dplyr::mutate(choice_1 = case_when(choice1 == 2 ~ 1, choice1 == 1 ~ 0, choice1 == 0 ~ NA_real_),
+                choice_2 = case_when(choice2 == 2 ~ 1, choice2 == 1 ~ 0, choice2 == 0 ~ NA_real_),
+                transition = case_when(
+                  choice_1 == 0 & state == 2 ~ 'common',
+                  choice_1 == 0 & state == 3 ~ 'rare',
+                  choice_1 == 1 & state == 3 ~ 'common',
+                  choice_1 == 1 & state == 2 ~ 'rare'),
+                cohort = 'decker',
+                subject_id = parse_number(id)) %>%
+  dplyr::select(subject_id, trial_num, choice_1, choice_2, transition, rt_1 = rts1, rt_2 = rts2, reward=money, cohort) 
+  
+
+decker = left_join(decker, decker_ages)
+
+
+# Potter data
+
+potter_ages = read_csv('https://raw.githubusercontent.com/pab2163/online_two_step_replication/master/analysis_code_and_data/data/potter/potter_ages.csv')
+
+potter = read_csv('https://raw.githubusercontent.com/pab2163/online_two_step_replication/master/analysis_code_and_data/data/potter/combined_potter_data.csv') %>%
+  dplyr::mutate(choice_1 = case_when(choice1 == 2 ~ 1, choice1 == 1 ~ 0, choice1 == 0 ~ NA_real_),
+                choice_2 = case_when(choice2 == 2 ~ 1, choice2 == 1 ~ 0, choice2 == 0 ~ NA_real_),
+                transition = case_when(
+                  choice_1 == 0 & state == 2 ~ 'common',
+                  choice_1 == 0 & state == 3 ~ 'rare',
+                  choice_1 == 1 & state == 3 ~ 'common',
+                  choice_1 == 1 & state == 2 ~ 'rare'),
+                cohort = 'potter',
+                subject_id = parse_number(id)) %>%
+  dplyr::select(subject_id, trial_num, choice_1, choice_2, transition, rt_1 = rts1, rt_2 = rts2, reward=money, cohort) 
+  
+
+potter = left_join(potter, potter_ages)
+```
+
+Code lags in hartley data
+
+```{r}
+hartley = plyr::rbind.fill(online, decker, potter) %>%
+  dplyr::select(id = subject_id, everything())
+
+
+hartley = hartley %>%
+    group_by(id) %>%
+    mutate(., last_transition = lag(transition),
+             last_reward = lag(reward),
+             last_choice_1 = lag(choice_1),
+             last_choice_2 = lag(choice_2),
+             stay1 = ifelse(choice_1 == last_choice_1, 1, 0),
+             stay2 = ifelse(choice_2 == last_choice_2, 1, 0)) %>%
+    ungroup() 
+
+# clean up trials not to be analyzed / generate matching choice numbers
+hartley = hartley %>%
+  dplyr::filter(!is.na(transition),  #no transition
+                !is.na(last_transition),
+                !is.na(rt_1),
+                !is.na(rt_2),
+                !is.na(choice_1),
+                !is.na(choice_2)) %>% # first trial or trials after a skipped
+                #!(cohort == 'online' & choice_2 ==0),
+                #!(cohort == 'online' & choice_1 ==0)) %>% # no choice 2 %>%
+  # dplyr::mutate(choice_2 = case_when(
+  #   cohort == 'decker' ~ choice_2,
+  #   cohort == 'online' & choice_2 == 1 ~ 0,
+  #   cohort == 'online' & choice_2 == 2 ~ 1,
+  # ),
+  # choice_1 = case_when(
+  #   cohort == 'decker' ~ choice_1,
+  #   cohort == 'online' & choice_1 == 1 ~ 0,
+  #   cohort == 'online' & choice_1 == 2 ~ 1),
+  dplyr::mutate(state = case_when(
+    choice_1 == 0 & transition == 'common' ~ 'A',
+    choice_1 == 0 & transition == 'rare' ~ 'B',
+    choice_1 == 1 & transition == 'common' ~ 'B',
+    choice_1 == 1 & transition == 'rare' ~ 'A',
+  ),
+  group = case_when(age < 13 ~ 'child',
+                            age >= 13 & age <= 17 ~ 'adol',
+                            age > 17 ~ 'adult'),
+  rt_1 = ifelse(cohort == 'online', rt_1, rt_1*1000),
+  rt_2 = ifelse(cohort == 'online', rt_2, rt_2*1000),
+  )
+
+
+
+
+hartley %>%
+  group_by(id, cohort, last_transition, last_reward, group) %>%
+  summarise(n = n(), 
+            stay1_prop = sum(stay1)/n) %>%
+  ggplot(aes(x = last_transition, y = stay1_prop, color = factor(last_reward))) +
+  stat_summary(fun.data = mean_cl_boot) +
+  facet_grid(rows = vars(group), cols = vars(cohort, last_reward))
+
+space_data %>%
+  group_by(id, last_transition, last_reward) %>%
+  summarise(n = n(), 
+            stay1_prop = sum(stay1)/n) %>%
+  ggplot(aes(x = last_transition, y = stay1_prop)) +
+  stat_summary(fun.data = mean_cl_boot) +
+  facet_grid(~last_reward)
+
+write.csv(hartley, file = '../clean_data/hartley_lag.csv', row.names = FALSE)
+
+```

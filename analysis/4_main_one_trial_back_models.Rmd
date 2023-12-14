@@ -1,0 +1,222 @@
+---
+title: "3_stage_2_analyses"
+author: "Paul Bloom"
+date: "1/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Matrix)
+library(tidyverse)
+library(lme4)
+library(brms)
+library(tidybayes)
+library(emmeans)
+library(easystats)
+theme_set(theme_bw())
+
+load('../clean_data/combined_data_for_models.rda')
+
+model_iter = 2000
+
+# put a prior on the beta coefficients (brms uses a flat prior by default)
+beta_prior = c(prior_string("student_t(3, 0, 10)", class = "b"))
+
+```
+
+
+# Stage 1 Models
+
+```{r}
+stage1_models = combined_data_for_models %>%
+  group_by(cohort) %>%
+  nest() %>%
+  mutate(model = purrr::map(data, ~brms::brm(data = ., stay1 ~ last_reward*last_transition + (last_reward*last_transition|id),
+            family= bernoulli(link = 'logit'), chains = 4, cores = 4, iter = model_iter, prior=beta_prior)))
+
+
+stage1_model_coefs = stage1_models %>%
+  mutate(coefs = purrr::map(model,
+                            ~broom.mixed::tidy(.))) %>%
+  dplyr::select(-model, -data) %>%
+  unnest(coefs)
+
+
+stage1_model_posterior_preds = stage1_models %>%
+  mutate(preds = purrr::map(model,
+                            ~tidybayes::add_epred_draws(newdata = expand.grid(last_reward = 0:1, 
+                                                                                last_transition = c('rare', 'common')),
+                            object=., re_formula = NA))) %>%
+  dplyr::select(-model, -data) %>%
+  unnest(preds)
+
+save(stage1_models, file = '../clean_data/stage1_models.rda')
+save(stage1_model_coefs, stage1_model_posterior_preds, file = '../clean_data/stage1_coefs_preds.rda')
+```
+
+## Re-parametrized
+```{r}
+stage1_models_centered = combined_data_for_models %>%
+  mutate(last_reward = ifelse(last_reward == 0, -0.5, 0.5),
+         last_transition = ifelse(last_transition=='rare', -0.5, 0.5)) %>%
+  group_by(cohort) %>%
+  nest() %>%
+  mutate(model = purrr::map(data, ~brms::brm(data = ., stay1 ~ last_reward*last_transition + (last_reward*last_transition|id),
+            family= bernoulli(link = 'logit'), chains = 4, cores = 4, iter = model_iter, prior=beta_prior)))
+
+
+stage1_model_coefs_centered = stage1_models_centered %>%
+  mutate(coefs = purrr::map(model,
+                            ~broom.mixed::tidy(.))) %>%
+  dplyr::select(-model, -data) %>%
+  unnest(coefs)
+
+save(stage1_model_coefs_centered, file = 'results/stage1_coefs_centered.rda')
+
+```
+
+# Stage 2 Models
+
+```{r}
+stage2_models = combined_data_for_models %>%
+  group_by(cohort) %>%
+  nest() %>%
+  mutate(model = purrr::map(data, ~brms::brm(data = ., stay2 ~ last_reward*state_match + (last_reward*state_match|id),
+            family= bernoulli(link = 'logit'), chains = 4, cores = 4, iter = model_iter, prior=beta_prior)))
+
+
+stage2_model_coefs = stage2_models %>%
+  mutate(coefs = purrr::map(model,
+                            ~broom.mixed::tidy(.))) %>%
+  dplyr::select(-model, -data) %>%
+  unnest(coefs)
+
+
+stage2_model_posterior_preds = stage2_models %>%
+  mutate(preds = purrr::map(model,
+                            ~tidybayes::add_epred_draws(newdata = expand.grid(last_reward = 0:1, 
+                                                                                state_match = c('Same State', 'Different State')),
+                            object=., re_formula = NA))) %>%
+  dplyr::select(-model, -data) %>%
+  unnest(preds)
+
+save(stage2_models, file = '../clean_data/stage2_models.rda')
+save(stage2_model_coefs, stage2_model_posterior_preds, file = '../clean_data/stage2_coefs_preds.rda')
+```
+
+# Stage 2 --> Next Trial Stage 1 Models
+
+```{r}
+next_trial_seq_models = combined_data_for_models %>%
+  group_by(cohort) %>%
+  nest() %>%
+  mutate(model = purrr::map(data, ~brms::brm(data = ., next_match_button ~ last_reward + (last_reward | id),
+            family= bernoulli(link = 'logit'), chains = 4, cores = 4, iter = model_iter, prior=beta_prior)))
+
+
+next_trial_seq_model_coefs = next_trial_seq_models %>%
+  mutate(coefs = purrr::map(model,
+                            ~broom.mixed::tidy(.))) %>%
+  dplyr::select(-model, -data) %>%
+  unnest(coefs)
+
+
+next_trial_seq_model_posterior_preds = next_trial_seq_models %>%
+  mutate(preds = purrr::map(model,
+                            ~tidybayes::add_epred_draws(newdata = expand.grid(last_reward = 0:1, 
+                                                                                state_match = c('Same State', 'Different State')),
+                            object=., re_formula = NA))) %>%
+  dplyr::select(-model, -data) %>%
+  unnest(preds)
+
+save(next_trial_seq_models, file = '../clean_data/next_trial_seq_models.rda')
+save(next_trial_seq_model_coefs, next_trial_seq_model_posterior_preds, file = '../clean_data/next_trial_seq_coefs_preds.rda')
+```
+
+
+# Stage 2 --> Next Trial Stage 1 Model Comparison
+
+
+```{r}
+next_trial_seq_model_comparison = combined_data_for_models %>%
+  dplyr::filter(cohort == 'decker', 
+                complete.cases(.)) %>%
+  group_by(cohort) %>%
+  nest() %>%
+  mutate(model_seq = purrr::map(data, ~brms::brm(data = ., choice_1 ~ last_reward*last_choice_2 + (last_reward*last_choice_2 | id),
+            family= bernoulli(link = 'logit'), chains = 4, cores = 4, iter = model_iter, prior=beta_prior)),
+         model_mbmf = purrr::map(data, ~brms::brm(data = ., choice_1 ~ last_reward*last_transition + (last_reward*last_transition | id),
+            family= bernoulli(link = 'logit'), chains = 4, cores = 4, iter = model_iter, prior=beta_prior)),
+         model_both = purrr::map(data, ~brms::brm(data = ., choice_1 ~ last_reward*last_choice_2 + last_reward*last_transition + 
+                                                    (last_reward*last_choice_2 + last_reward*last_transition | id),
+            family= bernoulli(link = 'logit'), chains = 4, cores = 4, iter = model_iter, prior=beta_prior)))
+
+
+get_loo_compare_manual = function(reference_loo, compare_loo_list){
+  n = length(unique(reference_loo$data$id))
+  
+  for (i in 1:length(compare_loo_list)){
+      m2 = compare_loo_list[[i]]
+      elpd_diff = sum(reference_loo$pointwise[,1] - m2$pointwise[,1])
+      elpd_se = sd(reference_loo$pointwise[,1] - m2$pointwise[,1])*sqrt(n)
+      comp = data.frame(elpd_diff=elpd_diff, elpd_se = elpd_se)
+      comp$model=names(compare_loo_list[i])
+      if (i ==1){
+        outdata = comp
+      }else{
+        outdata = rbind(outdata, comp)
+      }
+  }
+  return(outdata)
+}
+
+
+get_loo_compare_manual(reference_loo = next_trial_seq_model_comparison$model_mbmf[[1]],
+                       compare_loo_list = list('MB-MF + SM2'=next_trial_seq_model_comparison$model_both[[1]],
+                                               'SM2'=next_trial_seq_model_comparison$model_seq[[1]]))
+
+
+loo(next_trial_seq_model_comparison$model_mbmf[[1]],
+            next_trial_seq_model_comparison$model_both[[1]])
+
+loo_mbmf = add_criterion(next_trial_seq_model_comparison$model_mbmf[[1]], 'loo')
+loo_seq = add_criterion(next_trial_seq_model_comparison$model_seq[[1]], 'loo')
+loo_both = add_criterion(next_trial_seq_model_comparison$model_both[[1]], 'loo')
+
+loo_1 = loo_compare(loo_mbmf, loo_seq)
+loo_2 =  loo_compare(loo_mbmf, loo_both)
+
+
+if (rownames(loo_1)[1] == 'loo_seq'){
+  seq_vs_mbmf_elpd = loo_1[2,1]
+}else if (rownames(loo_1)[1] == 'loo_mbmf'){
+  seq_vs_mbmf_elpd = -1*loo_1[2,1]
+}
+
+if (rownames(loo_2)[1] == 'loo_both'){
+  both_vs_mbmf_elpd = loo_2[2,1]
+}else if (rownames(loo_2)[1] == 'loo_mbmf'){
+  both_vs_mbmf_elpd = -1*loo_2[2,1]
+}
+
+
+loo_df = data.frame(elpd_diff_mbmf = c(seq_vs_mbmf_elpd, both_vs_mbmf_elpd),
+                    elpd_diff_mbmf_se = c(loo_1[2,2], loo_2[2,2]),
+                    model = c('SM2', 'MBMF + SM2'))
+
+
+
+print(b, simplify = FALSE)
+
+h =log_lik(next_trial_seq_model_comparison$model_mbmf[[1]])
+loo::elpd(h)
+
+b$pointwise[,1]
+
+loo(next_trial_seq_model_comparison$model_mbmf[[1]])
+```
+

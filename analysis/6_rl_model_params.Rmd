@@ -1,0 +1,122 @@
+---
+title: "compare_rl_models"
+author: "Paul Bloom"
+date: "1/15/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(rstan)
+library(loo)
+library(tidyverse)
+library(tidybayes)
+```
+
+
+
+```{r}
+extract_weight_summary = function(model, cohort, type){
+  fits = rstan::extract(model)
+  spatiomotor_fit = data.frame(spatiomotor_weight = fits$mu_w2) %>%
+    mutate(cohort=cohort, type = type)
+  
+  return(spatiomotor_fit)
+}
+```
+
+```{r}
+load('results/full_model/decker_models.rda')
+load('results/full_model/potter_models.rda')
+```
+
+
+```{r}
+potter_sm1 = extract_weight_summary(model = fit_mbmf_spatiomotor_potter, 
+                                    cohort = 'Potter et al., 2017',
+                                    type = 'Spatiomotor Stage 2')
+
+potter_sm2 = extract_weight_summary(model = fit_mbmf_spatiomotor2_potter, 
+                                    cohort = 'Potter et al., 2017',
+                                    type = 'Spatiomotor Stage 2 & Between Stages')
+
+
+decker_sm1 = extract_weight_summary(model = fit_mbmf_spatiomotor_decker, 
+                                    cohort = 'Decker et al., 2016',
+                                    type = 'Spatiomotor Stage 2')
+
+decker_sm2 = extract_weight_summary(model = fit_mbmf_spatiomotor2_decker, 
+                                    cohort = 'Decker et al., 2016',
+                                    type = 'Spatiomotor Stage 2 & Between Stages')
+
+rm(list=ls(pattern="^fit_"))
+gc()
+```
+
+```{r}
+save(decker_sm1, decker_sm2, potter_sm1, potter_sm2, file = 'results/full_model/decker_potter_weights.rda')
+```
+
+```{r}
+load('results/full_model/danl_models.rda')
+
+danl_sm1 = extract_weight_summary(model = fit_mbmf_spatiomotor_danl, 
+                                    cohort = 'PACCT',
+                                    type = 'Spatiomotor Stage 2')
+
+danl_sm2 = extract_weight_summary(model = fit_mbmf_spatiomotor2_danl, 
+                                    cohort = 'PACCT',
+                                    type = 'Spatiomotor Stage 2 & Between Stages')
+
+rm(list=ls(pattern="^fit_"))
+gc()
+
+save(danl_sm1, danl_sm2, file = 'results/full_model/danl_weights.rda')
+```
+
+
+```{r}
+load('results/full_model/online_models.rda')
+
+online_sm1 = extract_weight_summary(model = fit_mbmf_spatiomotor_online, 
+                                    cohort = 'Nussenbaum et al., 2020',
+                                    type = 'Spatiomotor Stage 2')
+
+online_sm2 = extract_weight_summary(model = fit_mbmf_spatiomotor2_online, 
+                                    cohort = 'Nussenbaum et al., 2020',
+                                    type = 'Spatiomotor Stage 2 & Between Stages')
+
+rm(list=ls(pattern="^fit_"))
+gc()
+
+save(online_sm1, online_sm2, file = 'results/full_model/online_weights.rda')
+
+```
+
+```{r}
+load('results/full_model/danl_weights.rda')
+load('results/full_model/decker_potter_weights.rda')
+load('results/full_model/online_weights.rda')
+
+
+all_sm_weights = rbind(decker_sm1, decker_sm2,
+                       potter_sm1, potter_sm2,
+                       danl_sm1, danl_sm2,
+                       online_sm1, online_sm2)
+
+sm_weight_param_plot = all_sm_weights %>%
+  dplyr::filter(type == 'Spatiomotor Stage 2 & Between Stages') %>%
+  mutate(cohort = dplyr::recode(cohort, 'PACCT'=' PACCT')) %>%
+  ggplot(data = ., aes(y = spatiomotor_weight, x = cohort)) +
+  tidybayes::stat_dist_halfeye(.width = .95) +
+  labs(y = 'Spatiomotor Weight Parameter', x = 'Cohort') +
+  theme_bw()
+
+
+ggsave(sm_weight_param_plot, file = 'updated_figures/supplement/sm_weight_parameter_plot.png')
+
+```

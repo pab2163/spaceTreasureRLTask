@@ -1,0 +1,171 @@
+---
+title: "3_stage_2_analyses"
+author: "Paul Bloom"
+date: "1/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Matrix)
+library(tidyverse)
+library(lme4)
+library(brms)
+library(tidybayes)
+library(emmeans)
+library(easystats)
+theme_set(theme_bw())
+
+load('../clean_data/combined_data_for_models.rda')
+load('results/stage1_coefs_preds.rda')
+
+
+recode_names = function(df){
+  df = mutate(df, cohort = dplyr::recode(cohort,
+                                         'danl'=' PACCT',
+                                         'decker'='Decker et al.\n2016',
+                                         'online'='Nussenbaum et al.\n2020',
+                                         'potter'='Potter et al.\n2017',
+                                         'Simulated MB'='Simulated\nModel-Based',
+                                         'Simulated MF'='Simulated\nModel-Free'),
+              type = ifelse(grepl('Simulated', cohort), ' Simulated Agents', 'Child Participants'))
+  
+  return(df)
+}
+
+
+combined_data_for_models %>%
+  dplyr::filter(cohort == 'danl') %>%
+  group_by(id) %>%
+  count()
+```
+
+
+
+
+```{r}
+state_nonmatch = combined_data_for_models %>%
+  dplyr::filter(state_match == 'Different State', !grepl('Simulated', cohort)) %>%
+  ungroup() %>%
+  group_by(cohort) %>%
+  nest()
+
+beta_prior = c(prior_string("student_t(3, 0, 10)", class = "b"))
+
+state_nonmatch_models = state_nonmatch %>%
+  mutate(model = purrr::map(data, ~brms::brm(data = ., stay2 ~ last_reward + (last_reward|id),
+                                               family = bernoulli(link = 'logit'), cores = 4, chains = 4,
+                                             prior = beta_prior
+                                             )),
+         model_null = purrr::map(data, ~brms::brm(data = ., stay2 ~ 1 + (1|id),
+                                               family = bernoulli(link = 'logit'), cores = 4, chains = 4)))
+  
+
+
+save(state_nonmatch_models, file = 'results/state_nonmatch_models.rda')
+
+state_nonmatch_models = mutate(state_nonmatch_models,
+  model = purrr::map(model, ~add_criterion(., 'loo')),
+  model_null = purrr::map(model_null, ~add_criterion(., 'loo'))
+)
+
+
+state_nonmatch_models = mutate(state_nonmatch_models,
+  loo_comparison = purrr::map2(.x=model, .y = model_null, ~loo_compare(.x, .y)),
+  elpd_diff = unlist(purrr::map2(.x=model, .y = model_null, ~loo_compare(.x, .y)[2,1])),
+  se_diff = unlist(purrr::map2(.x=model, .y = model_null, ~loo_compare(.x, .y)[2,2]))
+)
+
+
+state_nonmatch_comparison = state_nonmatch_models %>%
+  dplyr::select(cohort, elpd_diff, se_diff) %>%
+  recode_names()
+
+stay2_model_comparison_plt = ggplot(state_nonmatch_comparison, aes(x = cohort, y = -1*elpd_diff)) +
+  geom_hline(yintercept = 0, lty = 2) +
+  geom_point() +
+  geom_errorbar(aes(ymin = -1*elpd_diff - 2*se_diff, ymax = -1*elpd_diff + 2*se_diff), width = 0) +
+  labs(x = 'Cohort', y = 'LOO ELPD Difference', title = 'Comparison of 1-trial back models',
+       subtitle = 'Models with versus without terms for reward-irrelevant spatiomotor information') +
+  annotate(geom = 'text', x = 'Decker et al.\n2016', y = 75, 
+           label = 'Better fit than model without reward-irrelevant parameters', color = 'navy', hjust = 0.4) +
+  annotate(geom = 'text', x = 'Decker et al.\n2016', y = -10, 
+           label =  'Worse fit than model without reward-irrelevant parameters', color = 'navy', hjust = 0.4) 
+
+ggsave(stay2_model_comparison_plt, file = 'updated_figures/supplement/stay2_model_comparison.png', width = 8, height = 5)
+```
+
+
+```{r}
+load('results/state_nonmatch_models.rda')
+
+state2_nonmatch_ranef = state_nonmatch_models %>%
+  mutate(coef = purrr::map(model, ~coef(.)$id[,,2] %>%
+                             as.data.frame(.) %>%
+                             mutate(id = row.names(.))))
+
+
+state2_nonmatch_ranef_est = state2_nonmatch_ranef %>%
+  unnest(coef) %>%
+  dplyr::select(-model, -model_null, -data) %>%
+  group_by(cohort) %>%
+  mutate(estimate_rank = rank(Estimate),
+         pct_positive = sum(Estimate>0)/n()) %>%
+  recode_names()
+
+
+individual_participants_stay2_fx_plot = ggplot(state2_nonmatch_ranef_est, aes(x = estimate_rank, y = Estimate)) +
+  geom_hline(yintercept = 0, lty = 2) +
+  geom_errorbar(aes(ymin = `Q2.5`, ymax = `Q97.5`), width = 0) +
+  geom_point() +
+  facet_grid(~cohort, scales = 'free_x') +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  labs(x = 'Individual Participants Ordered By Effect Magnitude',
+       y = 'Individual-Specific Effect Estimate',
+       title = 'A: Participant-specific estimates of reward-irrelevant stage-2 behavior\nWith partial pooling') + 
+       #subtitle = 'Effect of Prev. Trial Reward on Stage 2 Stays\nTrials where stage-2 state is different from previous trial stage-2 state') +
+  geom_text(x = 0, y = 2.5,
+           aes(label = paste0(100*round(pct_positive,3), '% of participants')), hjust = 0) 
+
+ggsave(individual_participants_stay2_fx_plot, filename = 'updated_figures/supplement/individual_participants_stay2_fx_plot.png',
+       width = 9, height = 4)
+
+
+individual_participants_stay2_raw_plot = combined_data_for_models %>%
+  dplyr::filter(state_match == 'Different State', !grepl('Simulated', cohort),
+                !is.na(stay2)) %>%
+  group_by(cohort, id, last_reward) %>%
+  summarise(stay2prob = sum(stay2)/n()) %>%
+  pivot_wider(id_cols = c('cohort', 'id'), names_from = last_reward, values_from = stay2prob) %>%
+  group_by(cohort) %>%
+  mutate(pct_positive = sum(`1` > `0`)/n()) %>%
+  recode_names() %>%
+  ggplot(data = ., aes(x = `0` ,y = `1`)) +
+  geom_abline(intercept = 0, slope = 1) +
+  geom_point() +
+  facet_grid(~cohort) +
+  xlim(0,1) +
+  ylim(0,1) +
+  geom_text(x = 0, y = 1,
+           aes(label = paste0(100*round(pct_positive,3), '% of participants')), hjust = 0) +
+  labs(x = 'P(Stage-2 Stay|Last Trial No Reward)',
+       y = 'P(Stage-2 Stay|Last Trial Reward)',
+       title = 'B: Raw summaries of reward-irrelevant stage-2 behaviors\nNo pooling')
+
+
+
+individual_stay2_fx_grid = cowplot::plot_grid(individual_participants_stay2_fx_plot, individual_participants_stay2_raw_plot,
+                   nrow = 2)
+
+
+cowplot::save_plot(individual_stay2_fx_grid, filename = 'updated_figures/supplement/individual_participants_stay2_fx_grid.png',
+                   base_width = 9, base_height = 8)
+
+```
+
