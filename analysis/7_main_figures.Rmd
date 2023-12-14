@@ -1,0 +1,692 @@
+---
+title: "3_stage_2_analyses"
+author: "Paul Bloom"
+date: "1/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Matrix)
+library(tidyverse)
+library(lme4)
+library(brms)
+library(tidybayes)
+library(emmeans)
+library(easystats)
+theme_set(theme_bw())
+
+load('../clean_data/combined_data_for_models.rda')
+load('results/stage1_coefs_preds.rda')
+
+
+recode_names = function(df){
+  df = mutate(df, cohort = dplyr::recode(cohort,
+                                         'danl'=' PACCT',
+                                         'decker'='Decker et al.\n2016',
+                                         'online'='Nussenbaum et al.\n2020',
+                                         'potter'='Potter et al.\n2017',
+                                         'Simulated MB'='Simulated\nModel-Based',
+                                         'Simulated MF'='Simulated\nModel-Free'),
+              type = ifelse(grepl('Simulated', cohort), ' Simulated Agents', 'Child Participants'))
+  
+  return(df)
+}
+```
+
+
+# Stage 1 Plot
+
+```{r}
+stage1_raw_stay_summary = combined_data_for_models %>%
+  group_by(id, last_reward, last_transition, cohort) %>%
+  summarise(stay1_proportion = sum(stay1 == 1)/n()) %>%
+  dplyr::mutate(last_reward = dplyr::recode(last_reward, '1'='Last Trial Trial Reward', '0'='Last Trial No Reward'),
+                last_transition = stringr::str_to_title(last_transition)) %>%
+  dplyr::filter(!grepl('Simulated', cohort))
+
+stage1_model_posterior_preds = recode_names(stage1_model_posterior_preds)
+stage1_raw_stay_summary = recode_names(stage1_raw_stay_summary)
+
+
+stage1_model_posterior_preds = mutate(stage1_model_posterior_preds, 
+                                      last_reward = dplyr::recode(last_reward, '1'='Last Trial Trial Reward', '0'='Last Trial No Reward'),
+                last_transition = stringr::str_to_title(last_transition))
+
+stage1_model_posterior_medians = stage1_model_posterior_preds %>%
+  group_by(last_reward, last_transition, cohort, type) %>%
+  summarise(posterior_median = median(.epred))
+
+
+
+stage1_plt = ggplot(stage1_raw_stay_summary, aes(x = last_transition, y = stay1_proportion, fill = last_reward)) +
+  facet_grid(cols = vars(type, cohort)) +
+  geom_line(aes(group = interaction(id, last_reward, type), color=last_reward), alpha = 0.2) +
+  geom_hline(yintercept = 0.5, lty = 2) +
+  #stat_summary(fun.data = mean_cl_boot, position = position_dodge(0.3)) +
+  labs(x = 'Last Trial Transition', y = 'P(Stage 1 Stay)') +
+  theme(legend.position = 'bottom', legend.title = element_blank(),
+        text=element_text(face= 'bold')) +
+  tidybayes::stat_slab(data = stage1_model_posterior_preds, aes(y = .epred),
+                          position = position_dodge(0.3), alpha = 0.5) +
+  geom_line(data = stage1_model_posterior_medians, 
+            aes(y = posterior_median, group = last_reward, color = last_reward),
+            linewidth = 1, position = position_dodge(0.3)) + 
+  tidybayes::stat_pointinterval(data = stage1_model_posterior_preds, 
+                                aes(y = .epred, color = last_reward),
+                          position = position_dodge(0.3), .width = 0.95) +
+
+  scale_color_viridis_d(begin = 0.1, end = 0.7) +
+  scale_fill_viridis_d(begin = 0.1, end = 0.7) 
+
+
+
+stage1_plt_sim = ggplot(data = dplyr::filter(stage1_raw_stay_summary, type == ' Simulated Agents'),
+                                      aes(x = last_transition, y = stay1_proportion, fill = last_reward)) +
+  facet_grid(cols = vars(cohort)) +
+  geom_line(aes(group = interaction(id, last_reward), color=last_reward), alpha = 0.2) +
+  geom_hline(yintercept = 0.5, lty = 2) +
+  labs(x = 'Last Trial Transition', y = 'P(Stage 1 Stay)', title = 'A: Simulated Agents') +
+  theme(legend.position = 'none', legend.title = element_blank(),
+        text=element_text(face= 'bold')) +
+  tidybayes::stat_slab(data = dplyr::filter(stage1_model_posterior_preds, type == ' Simulated Agents'),
+                        aes(y = .epred), position = position_dodge(0.3), alpha = 0.5) +
+  geom_line(data = dplyr::filter(stage1_model_posterior_medians, type == ' Simulated Agents'),
+            aes(y = posterior_median, group = last_reward, color = last_reward),
+            linewidth = 1, position = position_dodge(0.3)) + 
+  tidybayes::stat_pointinterval(data = dplyr::filter(stage1_model_posterior_preds, type== ' Simulated Agents'),
+                                aes(y = .epred, color = last_reward),
+                          position = position_dodge(0.3), .width = 0.95) +
+
+  scale_color_viridis_d(begin = 0.1, end = 0.7) +
+  scale_fill_viridis_d(begin = 0.1, end = 0.7) +
+  ylim(0,1)
+
+stage1_plt_children = ggplot(data = dplyr::filter(stage1_raw_stay_summary, type == 'Child Participants'),
+                                      aes(x = last_transition, y = stay1_proportion, fill = last_reward)) +
+  facet_grid(cols = vars(cohort)) +
+  geom_line(aes(group = interaction(id, last_reward), color=last_reward), alpha = 0.2) +
+  geom_hline(yintercept = 0.5, lty = 2) +
+  labs(x = 'Last Trial Transition', y = 'P(Stage 1 Stay)', title = 'B: Child Participants') +
+  theme(legend.position = 'bottom', legend.title = element_blank(),
+        text=element_text(face= 'bold')) +
+  tidybayes::stat_slab(data = dplyr::filter(stage1_model_posterior_preds, type == 'Child Participants'),
+                        aes(y = .epred), position = position_dodge(0.3), alpha = 0.5) +
+  geom_line(data = dplyr::filter(stage1_model_posterior_medians, type == 'Child Participants'),
+            aes(y = posterior_median, group = last_reward, color = last_reward),
+            linewidth = 1, position = position_dodge(0.3)) + 
+  tidybayes::stat_pointinterval(data = dplyr::filter(stage1_model_posterior_preds, type== 'Child Participants'),
+                                aes(y = .epred, color = last_reward),
+                          position = position_dodge(0.3), .width = 0.95) +
+
+  scale_color_viridis_d(begin = 0.1, end = 0.7) +
+  scale_fill_viridis_d(begin = 0.1, end = 0.7) +
+  ylim(0,1)
+
+
+stage1_plta = cowplot::plot_grid(stage1_plt_sim, stage1_plt_children, rel_widths = c(1,2),
+                   align = 'h', axis = 'bt')
+
+
+cowplot::save_plot(stage1_plta, filename = 'updated_figures/stage1_plt_a.png', base_width = 8, base_height = 5)
+
+
+ggsave(stage1_plt, file = 'updated_figures/stage1_plt.png', width =8, height = 5)
+```
+
+# Stage 2 Plot
+
+```{r}
+load('results/stage2_coefs_preds.rda')
+
+stay2_all_match_summary = combined_data_for_models %>%
+  dplyr::filter(!is.na(state_match), !is.na(stay2)) %>%
+  group_by(id, cohort, last_reward, state_match) %>%
+  summarise(n = n(),
+            stay2_prob = sum(stay2)/n()) %>%
+  mutate(last_reward2 = dplyr::recode(last_reward, '1'='Last Trial Reward', '0'='Last Trial No Reward'),
+         last_reward = dplyr::recode(last_reward, '1'='Reward', '0'='No Reward'),
+         state_match2 = dplyr::recode(state_match,
+                                     'Different State'='Different\nState', 'Same State'='Same\nState'),
+         state_match = dplyr::recode(state_match,
+                                     'Different State'='Different Stage 2 State from Last Trial\nSlope Indicates use of Reward-Irrelevant Spatiomotor Info',
+                                     'Same State'='Same Stage 2 State as Last Trial\nSlope Indicates use of Reward-Relevant Stimulus Info')) %>%
+  dplyr::filter(!grepl('Simulated', cohort))
+
+stage2_model_posterior_preds = recode_names(stage2_model_posterior_preds) %>%
+  mutate(last_reward2 = dplyr::recode(last_reward, '1'='Last Trial Reward', '0'='Last Trial No Reward'),
+         last_reward = dplyr::recode(last_reward, '1'='Reward', '0'='No Reward'),
+         state_match2 = dplyr::recode(state_match,
+                                     'Different State'='Different\nState', 'Same State'='Same\nState'),
+         state_match = dplyr::recode(state_match,
+                                     'Different State'='Different Stage 2 State from Last Trial\nSlope Indicates use of Reward-Irrelevant Spatiomotor Info',
+                                     'Same State'='Same Stage 2 State as Last Trial\nSlope Indicates use of Reward-Relevant Stimulus Info'))
+stay2_all_match_summary = recode_names(stay2_all_match_summary)
+
+stage2_model_posterior_medians = stage2_model_posterior_preds %>%
+  group_by(last_reward, last_reward2, state_match, state_match2, cohort, type) %>%
+  summarise(posterior_median = median(.epred))
+
+
+# stage2_plt = ggplot(stay2_all_match_summary, aes(x = state_match, y= stay2_prob, fill = last_reward)) +
+#   facet_grid(cols = vars(cohort)) +
+#   geom_line(aes(group = interaction(id, last_reward), color = last_reward), alpha = 0.2) +
+#   geom_hline(yintercept = 0.5, lty = 2) + 
+#   labs(y = 'P(Stage 2 Stay)\nSame Stage 2 Buttom Press as Last Trial', x = 'Stage 2 State Compared to Last Trial') +
+#   tidybayes::stat_slab(data = stage2_model_posterior_preds, aes(y = .epred),
+#                           position = position_dodge(0.3), alpha = 0.5) +
+#   geom_line(data = stage2_model_posterior_medians, 
+#             aes(y = posterior_median, group = last_reward, color = last_reward),
+#             linewidth = 1, position = position_dodge(0.3)) + 
+#   tidybayes::stat_pointinterval(data = stage2_model_posterior_preds, 
+#                                 aes(y = .epred, color = last_reward),
+#                           position = position_dodge(0.3), .width = 0.95) +
+#   scale_color_viridis_d(begin = 0.1, end = 0.7) +
+#   scale_fill_viridis_d(begin = 0.1, end = 0.7) +
+#   theme(legend.position = 'bottom', legend.title=element_blank(),
+#         text = element_text(face = 'bold')) 
+
+
+stage2_plt_sim = ggplot(data = dplyr::filter(stay2_all_match_summary, type == ' Simulated Agents'), 
+                                             aes(x = last_reward, y= stay2_prob, fill = state_match)) +
+  facet_grid(cols = vars(cohort)) +
+  geom_line(aes(group = interaction(id, state_match), color = state_match), alpha = 0.2) +
+  geom_hline(yintercept = 0.5, lty = 2) + 
+  labs(y = 'P(Stage 2 Stay)\nSame Stage 2 Buttom Press as Last Trial', x = 'Last Trial Reward',
+       title = 'A: Simulated Agents') +
+  tidybayes::stat_slab(data = dplyr::filter(stage2_model_posterior_preds, type == ' Simulated Agents'), 
+                       aes(y = .epred), position = position_dodge(0.3), alpha = 0.5) +
+  geom_line(data = dplyr::filter(stage2_model_posterior_medians, type == ' Simulated Agents'), 
+            aes(y = posterior_median, group = state_match, color = state_match),
+            linewidth = 1, position = position_dodge(0.3)) + 
+  tidybayes::stat_pointinterval(data = dplyr::filter(stage2_model_posterior_preds, type == ' Simulated Agents'),
+                                aes(y = .epred, color = state_match),
+                          position = position_dodge(0.3), .width = 0.95) +
+  scale_color_viridis_d(begin = 0.4, end = 0.95) +
+  scale_fill_viridis_d(begin = 0.4, end = 0.95) +
+  #scale_color_manual(values = c('blue', 'dark red')) +
+  #scale_fill_manual(values = c('blue', 'dark red')) +
+  theme(legend.position = 'none', legend.title=element_blank(),
+        text = element_text(face = 'bold')) +
+  ylim(0,1)
+
+
+stage2_plt_sim_b = ggplot(data = dplyr::filter(stay2_all_match_summary, type == ' Simulated Agents'), 
+                                             aes(x = state_match2, y= stay2_prob, fill = last_reward2)) +
+  facet_grid(cols = vars(cohort)) +
+  geom_line(aes(group = interaction(id, state_match2), color = last_reward2), alpha = 0.2) +
+  geom_hline(yintercept = 0.5, lty = 2) + 
+  labs(y = 'P(Stage 2 Stay)\nSame Stage 2 Buttom Press as Last Trial', x = 'Stage 2 State Compared to Last Trial',
+       title = 'A: Simulated Agents') +
+  tidybayes::stat_slab(data = dplyr::filter(stage2_model_posterior_preds, type == ' Simulated Agents'), 
+                       aes(y = .epred), position = position_dodge(0.3), alpha = 0.5) +
+  geom_line(data = dplyr::filter(stage2_model_posterior_medians, type == ' Simulated Agents'), 
+            aes(y = posterior_median, group = last_reward2, color = last_reward2),
+            linewidth = 1, position = position_dodge(0.3)) + 
+  tidybayes::stat_pointinterval(data = dplyr::filter(stage2_model_posterior_preds, type == ' Simulated Agents'),
+                                aes(y = .epred, color = last_reward2),
+                          position = position_dodge(0.3), .width = 0.95) +
+  scale_color_viridis_d(begin = 0.1, end = 0.7) +
+  scale_fill_viridis_d(begin = 0.1, end = 0.7) +
+  #scale_color_manual(values = c('blue', 'dark red')) +
+  #scale_fill_manual(values = c('blue', 'dark red')) +
+  theme(legend.position = 'none', legend.title=element_blank(),
+        text = element_text(face = 'bold')) +
+  ylim(0,1) +
+  scale_x_discrete(limits = c('Different\nState', 'Same\nState'))
+
+
+stage2_plt_children = ggplot(data = dplyr::filter(stay2_all_match_summary, type == 'Child Participants'), 
+                                             aes(x = last_reward, y= stay2_prob, fill = state_match)) +
+  facet_grid(cols = vars(cohort)) +
+  geom_line(aes(group = interaction(id, state_match), color = state_match), alpha = 0.2) +
+  geom_hline(yintercept = 0.5, lty = 2) + 
+  labs(y = NULL, x = 'Last Trial Reward',
+       title = 'B: Child Participants') +
+  tidybayes::stat_slab(data = dplyr::filter(stage2_model_posterior_preds, type == 'Child Participants'), 
+                       aes(y = .epred), position = position_dodge(0.3), alpha = 0.5) +
+  geom_line(data = dplyr::filter(stage2_model_posterior_medians, type == 'Child Participants'), 
+            aes(y = posterior_median, group = state_match, color = state_match),
+            linewidth = 1, position = position_dodge(0.3)) + 
+  tidybayes::stat_pointinterval(data = dplyr::filter(stage2_model_posterior_preds, type == 'Child Participants'),
+                                aes(y = .epred, color = state_match),
+                          position = position_dodge(0.3), .width = 0.95) +
+  #scale_color_viridis_d(begin = 0.4, end = 0.95) +
+  #scale_fill_viridis_d(begin = 0.4, end = 0.95) +
+  scale_color_manual(values = c('dark red', 'blue')) +
+  scale_fill_manual(values = c('dark red', 'blue')) +
+  theme(legend.position = 'bottom', legend.title=element_blank(),
+        text = element_text(face = 'bold')) +
+  ylim(0,1) +
+  guides(color = guide_legend(nrow = 2),
+         fill = guide_legend(nrow = 2))
+
+
+stage2_plt_children_b = ggplot(data = dplyr::filter(stay2_all_match_summary, type == 'Child Participants'), 
+                                             aes(x = state_match2, y= stay2_prob, fill = last_reward2)) +
+  facet_grid(cols = vars(cohort)) +
+  geom_line(aes(group = interaction(id, last_reward2), color = last_reward2), alpha = 0.2) +
+  geom_hline(yintercept = 0.5, lty = 2) + 
+  labs(y = 'P(Stage 2 Stay)\nSame Stage 2 Buttom Press as Last Trial', x = 'Stage 2 State Compared to Last Trial',
+       title = 'B: Child Participants') +
+  tidybayes::stat_slab(data = dplyr::filter(stage2_model_posterior_preds, type == 'Child Participants'), 
+                       aes(y = .epred), position = position_dodge(0.3), alpha = 0.5) +
+  geom_line(data = dplyr::filter(stage2_model_posterior_medians, type == 'Child Participants'), 
+            aes(y = posterior_median, group = last_reward2, color = last_reward2),
+            linewidth = 1, position = position_dodge(0.3)) + 
+  tidybayes::stat_pointinterval(data = dplyr::filter(stage2_model_posterior_preds, type == 'Child Participants'),
+                                aes(y = .epred, color = last_reward2),
+                          position = position_dodge(0.3), .width = 0.95) +
+  scale_color_viridis_d(begin = 0.1, end = 0.7) +
+  scale_fill_viridis_d(begin = 0.1, end = 0.7) +
+  #scale_color_manual(values = c('blue', 'dark red')) +
+  #scale_fill_manual(values = c('blue', 'dark red')) +
+  theme(legend.position = 'bottom', legend.title=element_blank(),
+        text = element_text(face = 'bold')) +
+  ylim(0,1)
+
+
+stage2_plta = cowplot::plot_grid(stage2_plt_sim, stage2_plt_children, rel_widths = c(1,1.7),
+                   align = 'h', axis = 'bt')
+
+stage2_pltb = cowplot::plot_grid(stage2_plt_sim_b, stage2_plt_children_b, rel_widths = c(1,1.7),
+                   align = 'h', axis = 'bt')
+
+cowplot::save_plot(stage2_plta, filename = 'updated_figures/stage2_plt_a.png', base_width = 9.5, base_height = 5.5)
+
+
+ggsave(stage2_pltb, file = 'updated_figures/stage2_plt.png', width =9, height = 5)
+
+```
+
+# Stage 2 --> Next Trial Stage 1 Plot
+
+```{r}
+load('results/next_trial_seq_coefs_preds.rda')
+
+next_trial_seq_model_posterior_preds = recode_names(next_trial_seq_model_posterior_preds)  %>%
+  mutate(last_reward = dplyr::recode(last_reward, '1'='Reward', '0'='No Reward')) 
+
+next_trial_seq_model_posterior_medians = next_trial_seq_model_posterior_preds %>%
+  group_by(last_reward, state_match, cohort, type) %>%
+  summarise(posterior_median = median(.epred))
+
+seq_analysis_raw_summary = combined_data_for_models %>%
+  group_by(cohort, id, last_reward) %>%
+  summarise(next_match_button_prob = sum(next_match_button, na.rm = TRUE)/n()) %>%
+  mutate(last_reward = dplyr::recode(last_reward, '1'='Reward', '0'='No Reward')) %>%
+  dplyr::filter(!grepl('Simulated', cohort))
+
+seq_analysis_raw_summary = recode_names(seq_analysis_raw_summary)
+
+
+seq_analysis_plt = ggplot(seq_analysis_raw_summary, aes(x = last_reward, y = next_match_button_prob, fill = last_reward)) +
+  facet_grid(~cohort) +
+  geom_line(aes(group = interaction(id, cohort)), alpha = 0.1) +
+  labs(x = 'Last Trial Reward', y = 'P(Stage 1 Button = Last Trial Stage 2 Button)', title = '') +
+  geom_hline(yintercept = 0.5, lty = 2) +
+  geom_line(data = next_trial_seq_model_posterior_medians, 
+            aes(y = posterior_median, group = cohort),
+            color = 'black',
+            linewidth = 1, position = position_dodge(0.3)) + 
+  tidybayes::stat_slab(data = next_trial_seq_model_posterior_preds, aes(y = .epred),
+                          position = position_dodge(0.3), alpha = 0.5) +
+  tidybayes::stat_pointinterval(data = next_trial_seq_model_posterior_preds, 
+                                aes(y = .epred, color = last_reward),
+                          position = position_dodge(0.3), .width = 0.95) +
+  scale_color_viridis_d(begin = 0.1, end = 0.7) +
+  scale_fill_viridis_d(begin = 0.1, end = 0.7) +
+  theme(legend.position = 'bottom',
+        legend.title = element_blank(),
+        text = element_text(face = 'bold')) +
+  theme(axis.text.x = element_text(angle = 30, vjust = 0.6, hjust=0.5))
+
+
+seq_analysis_plt_sim = ggplot(data = dplyr::filter(seq_analysis_raw_summary, type == ' Simulated Agents'),
+                              aes(x = last_reward, y = next_match_button_prob, fill = last_reward)) +
+  facet_grid(~cohort) +
+  geom_line(aes(group = interaction(id, cohort)), alpha = 0.1) +
+  labs(x = 'Last Trial Reward', y = 'P(Stage 1 Button = Last Trial Stage 2 Button)', title = 'A: Simulated Agents') +
+  geom_hline(yintercept = 0.5, lty = 2) +
+  geom_line(data = dplyr::filter(next_trial_seq_model_posterior_medians, type == ' Simulated Agents'),
+            aes(y = posterior_median, group = cohort),
+            color = 'black',
+            linewidth = 1, position = position_dodge(0.3)) + 
+  tidybayes::stat_slab(data = dplyr::filter(next_trial_seq_model_posterior_preds, type == ' Simulated Agents'), 
+                       aes(y = .epred),position = position_dodge(0.3), alpha = 0.5) +
+  tidybayes::stat_pointinterval(data = dplyr::filter(next_trial_seq_model_posterior_preds, type == ' Simulated Agents'),
+                                aes(y = .epred, color = last_reward),
+                          position = position_dodge(0.3), .width = 0.95) +
+  scale_color_viridis_d(begin = 0.1, end = 0.7) +
+  scale_fill_viridis_d(begin = 0.1, end = 0.7) +
+  theme(legend.position = 'none',
+        legend.title = element_blank(),
+        text = element_text(face = 'bold')) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=.8)) +
+  ylim(0.15,1)
+
+seq_analysis_plt_children = ggplot(data = dplyr::filter(seq_analysis_raw_summary, type == 'Child Participants'),
+                              aes(x = last_reward, y = next_match_button_prob, fill = last_reward)) +
+  facet_grid(~cohort) +
+  geom_line(aes(group = interaction(id, cohort)), alpha = 0.1) +
+  labs(x = 'Last Trial Reward', y = NULL, title = 'B: Child Participants') +
+  geom_hline(yintercept = 0.5, lty = 2) +
+  geom_line(data = dplyr::filter(next_trial_seq_model_posterior_medians, type == 'Child Participants'),
+            aes(y = posterior_median, group = cohort),
+            color = 'black',
+            linewidth = 1, position = position_dodge(0.3)) + 
+  tidybayes::stat_slab(data = dplyr::filter(next_trial_seq_model_posterior_preds, type == 'Child Participants'), 
+                       aes(y = .epred),position = position_dodge(0.3), alpha = 0.5) +
+  tidybayes::stat_pointinterval(data = dplyr::filter(next_trial_seq_model_posterior_preds, type == 'Child Participants'),
+                                aes(y = .epred, color = last_reward),
+                          position = position_dodge(0.3), .width = 0.95) +
+  scale_color_viridis_d(begin = 0.1, end = 0.7) +
+  scale_fill_viridis_d(begin = 0.1, end = 0.7) +
+  theme(legend.position = 'bottom',
+        legend.title = element_blank(),
+        text = element_text(face = 'bold')) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=.8)) +
+  ylim(0.15,1)
+
+seq_analysis_plt_top = cowplot::plot_grid(seq_analysis_plt_sim, seq_analysis_plt_children, rel_widths = c(1,1.75),
+                   align = 'h', axis = 'bt')
+
+ggsave(seq_analysis_plt, filename = 'updated_figures/seq_analysis.png', width = 11, height =5)
+
+```
+# Tables
+```{r}
+round_num = 3
+load('results/stage1_coefs_centered.rda')
+stage1_model_table = stage1_model_coefs_centered %>%
+  dplyr::filter(!grepl('sd__', term), !grepl('cor__', term)) %>%
+                #!grepl('Intercept', term)) %>%
+  dplyr::select(cohort, term, estimate, conf.low, conf.high) %>%
+  mutate(sig_star = ifelse(conf.low*conf.high > 0, '*', ''),
+         cohort = dplyr::recode(cohort,
+                                         'danl'=' PACCT',
+                                         'decker'='Decker et al. 2016',
+                                         'online'='Nussenbaum et al. 2020',
+                                         'potter'='Potter et al. 2017',
+                                         'Simulated MB'='Simulated Model-Based',
+                                         'Simulated MF'='Simulated Model-Free'),) %>%
+  mutate(`Estimate (95% PI)` = paste0(round(estimate, round_num), ' [', round(conf.low, round_num), ', ',
+                                      round(conf.high, round_num), ']', sig_star)) %>%
+  dplyr::select(Cohort = cohort, Parameter=term, `Estimate (95% PI)`) %>%
+  mutate(Parameter = dplyr::recode(Parameter, 
+         '(Intercept)'='Intercept',
+         'last_reward'='Last Trial  Reward',
+         'last_transition'='Last Trial  Transition',
+         'last_reward:last_transition'='Last Trial Reward X Transition')) %>%
+  arrange(Parameter, Cohort) 
+
+
+write.csv(stage1_model_table, file = 'tables/stage1_model_coefs.csv', row.names = FALSE)
+
+
+stage2_model_table_for_table = stage2_model_coefs %>%
+  dplyr::filter(!grepl('sd__', term), !grepl('cor__', term)) %>%
+  dplyr::select(cohort, term, estimate, conf.low, conf.high) %>%
+  arrange(term, cohort) %>%
+  mutate(sig_star = ifelse(conf.low*conf.high > 0, '*', ''),
+         cohort = dplyr::recode(cohort,
+                                         'danl'=' PACCT',
+                                         'decker'='Decker et al. 2016',
+                                         'online'='Nussenbaum et al. 2020',
+                                         'potter'='Potter et al. 2017',
+                                         'Simulated MB'='Simulated Model-Based',
+                                         'Simulated MF'='Simulated Model-Free')) %>%
+  mutate(`Estimate (95% PI)` = paste0(round(estimate, round_num), ' [', round(conf.low, round_num), ', ',
+                                      round(conf.high, round_num), ']', sig_star)) %>%
+  dplyr::select(Parameter=term, Cohort = cohort, `Estimate (95% PI)`) %>%
+  mutate(Parameter = dplyr::recode(Parameter, 
+         '(Intercept)'='Intercept',
+         'last_reward'='Last TrialReward',
+         'state_matchSameState'='Same State',
+         'last_reward:state_matchSameState'='Same State X Last Trial Reward')) %>%
+  arrange(Parameter, Cohort) 
+
+
+write.csv(stage2_model_table, file = 'tables/stage2_model_coefs.csv', row.names = FALSE)
+
+
+seq_model_table = next_trial_seq_model_coefs %>%
+  dplyr::filter(!grepl('sd__', term), !grepl('cor__', term),
+                !grepl('Intercept', term)) %>%
+  dplyr::select(cohort, term, estimate, conf.low, conf.high) %>%
+  arrange(term, cohort)
+
+
+seq_model_table = recode_names(seq_model_table) %>%
+  mutate(cohort = dplyr::recode(cohort,
+                                'Simulated\nModel-Based'='Simulated Model-Based',
+                                'Simulated\nModel-Free'='Simulated Model-Free',
+                                'Decker et al.\n2016'='Decker et al., 2016',
+                                'Nussenbaum et al.\n2020'='Nussenbaum et al., 2020',
+                                'Potter et al.\n2017'='Potter et al., 2017'
+                                ))
+
+
+stage2_model_table = stage2_model_coefs %>%
+  recode_names(.) %>%
+  mutate(cohort = dplyr::recode(cohort,
+                                'Simulated\nModel-Based'='Simulated Model-Based',
+                                'Simulated\nModel-Free'='Simulated Model-Free',
+                                'Decker et al.\n2016'='Decker et al., 2016',
+                                'Nussenbaum et al.\n2020'='Nussenbaum et al., 2020',
+                                'Potter et al.\n2017'='Potter et al., 2017'
+                                ))
+
+seq_analysis_term = ggplot(seq_model_table, aes(x = factor(cohort,
+                                                           levels  = rev(levels(factor(cohort)))), y = estimate)) +
+  geom_point(size = 2, aes(color = type)) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high, color = type), width = 0, linewidth = 1) +
+  geom_hline(yintercept = 0, lty = 2) + 
+  coord_flip() +
+  labs(y = 'Effect of last trial reward on repeating the last stage 2 button press at current stage 1', x = NULL, title = 'C: Model Parameter Estimates') +
+  theme(text = element_text(face = 'bold'),
+        legend.position = 'none') +
+  scale_color_manual(values = c('black', 'blue'))
+
+
+stage_term = stage2_model_table %>%
+  dplyr::filter(term == 'last_reward') %>%
+  ggplot(data=., aes(x = factor(cohort,
+                          levels  = rev(levels(factor(cohort)))), y = estimate)) +
+  geom_point(size = 2, color = 'dark red') +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0, linewidth = 1, color = 'dark red') +
+  geom_hline(yintercept = 0, lty = 2) + 
+  coord_flip() +
+  labs(y = 'Effect of last trial reward on stage 2 stays\nTrials where the stage 2 state is different from the previous one', x = NULL, title = 'C: Parameter Estimates for use of Reward-Irrelevant Spatiomotor Information') +
+  theme(text = element_text(face = 'bold'),
+        legend.position = 'none') +
+  scale_color_manual(values = c('black', 'blue'))
+
+
+# seq_analysis_grid = cowplot::plot_grid(seq_analysis_plt, seq_analysis_term,
+#                    rel_widths = c(3,1), labels = c('A', 'B'),
+#                    align = 'h', axis = 'bt')
+
+stage_2_analysis_grid = cowplot::plot_grid(stage2_plta, stage_term,
+                   nrow = 2, rel_heights = c(2, 1))
+
+stage_2_analysis_gridb = cowplot::plot_grid(stage2_pltb, stage_term,
+                   nrow = 2, rel_heights = c(2, 1))
+
+cowplot::save_plot(stage_2_analysis_grid, filename = 'updated_figures/stage2_plt_grid.png', base_width = 9.5, base_height = 8)
+cowplot::save_plot(stage_2_analysis_gridb, filename = 'updated_figures/stage2_plt_grid_b.png', base_width = 9.5, base_height = 8)
+
+
+seq_analysis_grid2 = cowplot::plot_grid(seq_analysis_plt, seq_analysis_term,
+                   nrow = 2, rel_heights = c(2, 1), 
+                   labels = c('A', 'B'))
+
+seq_analysis_grida = cowplot::plot_grid(seq_analysis_plt_top, seq_analysis_term,
+                   nrow = 2, rel_heights = c(2, 1))
+
+cowplot::save_plot(seq_analysis_grid2, filename = 'updated_figures/seq_analysis_grid.png', base_width = 9.5, base_height =7)
+cowplot::save_plot(seq_analysis_grida, filename = 'updated_figures/seq_analysis_grid_a.png', base_width = 8, base_height =7)
+
+```
+
+
+```{r}
+load('results/comparison_plot.rda')
+
+all_comparisons = mutate(all_comparisons, model = dplyr::recode(model,
+                                                                'MB-MF+SM1'='Model-Free/Model-Based + Spatio-Motor at Stage 2',
+                                                                'MB-MF+SM2'='Model-Free/Model-Based + Spatio-Motor at Stage 2 & Between Stages',
+                                                                'SM2'='Spatio-Motor Only'),
+                         cohort = dplyr::recode(cohort, 'PACCT'=' PACCT',
+                                                'Decker'='Decker et al.\n2016',
+                                                'Nussenbaum'='Nussenbaum et al.\n2020',
+                                                'Potter'='Potter et al.\n2017',))
+
+comparison_plot = ggplot(all_comparisons, aes(x = cohort, y = -1*elpd_diff, color = model)) +
+  geom_point(position = position_dodge(0.2), size = 2) +
+  geom_errorbar(aes(ymin = -1*elpd_diff_lwr, ymax = -1*elpd_diff_upr), width= 0, position = position_dodge(0.2),
+                linewidth=1) +
+  geom_hline(yintercept = 0, lty = 2) +
+  theme_bw() +
+  labs(y = 'LOO ELPD Difference vs. MF/MB Only Model', color = 'Model', x = 'Cohort') +
+  scale_color_manual(values = c('#000000', '#009E73', '#CC79A7')) +
+  theme(text = element_text(face = 'bold'),
+        legend.position = 'bottom', legend.box = 'vertical') +
+  annotate(geom = 'text', x = ' PACCT', y = 400, label = 'Better fit than MF/MB Only', color = 'navy', hjust = 0.4) +
+  annotate(geom = 'text', x = ' PACCT', y = -300, label = 'Worse fit than MF/MB Only', color = 'navy', hjust = 0.4) +
+  guides(color = guide_legend(nrow = 3))
+
+ggsave(comparison_plot, filename = 'updated_figures/model_comparison_plot.png', height = 5, width = 6)
+```
+
+
+```{r}
+state_nonmatch = combined_data_for_models %>%
+  dplyr::filter(state_match == 'Different State', cohort == 'decker')
+  
+
+m1 = brms::brm(data = state_nonmatch, stay2 ~ last_reward + (last_reward|id),
+               family = bernoulli(link = 'logit'), cores = 4)
+
+m2 = brms::brm(data = state_nonmatch, stay2 ~ 1 + (1|id),
+               family = bernoulli(link = 'logit'), cores = 4)
+
+m1 = add_criterion(m1, 'loo')
+m2 = add_criterion(m2, 'loo')
+
+loo_compare(m1, m2)
+
+
+waic(m1, m2)
+
+summary(m1)
+
+g = ranef(m1)
+h = g$id
+
+?ranef()
+
+c = data.frame(h[,,2])
+
+fixef(m1)
+
+summary(c$Estimate)
+
+l = coef(m1)$id[,,2]
+coef(m1)
+
+k = data.frame(l)
+
+ggplot(k, aes(x = rank(Estimate), y = Estimate)) +
+  geom_hline(yintercept = 0, lty = 2) +
+  geom_errorbar(aes(ymin = `Q2.5`, ymax = `Q97.5`), width = 0) +
+  geom_point() 
+
+
+combined_data_for_models %>%
+  group_by(cohort, id) %>%
+  count() %>%
+  group_by(cohort) %>%
+  count()
+```
+
+```{r}
+rt_data  = all_data %>%
+  dplyr::filter(!grepl('Simulated', cohort)) %>%
+  recode_names(.) %>%
+  group_by(cohort, id, transition) %>%
+  summarise(mean_rt_2 = mean(rt_2, na.rm = TRUE)) %>%
+  mutate(transition = stringr::str_to_title(transition)) 
+
+
+rt_summary = rt_data %>%
+  group_by(cohort, transition) %>%
+  mutate(mean_rt_2 = mean(mean_rt_2))
+
+rt_plot = rt_data %>%
+  ggplot(data = ., aes(x = transition, y = mean_rt_2)) +
+  stat_summary(fun.data = mean_cl_boot) +
+  geom_line(data = rt_summary, aes(group = cohort)) + 
+  #geom_line(aes(group = id), alpha = 0.1) +
+  facet_grid(~cohort) +
+  labs(title = 'C: Reaction times indicate knowledge of transition structure in all chorts',
+       y = 'Stage 2 Reaction Time (ms)', x = 'Transition Type') +
+  theme(text = element_text(face = 'bold'))
+
+
+rt_models = all_data %>%
+  dplyr::filter(!grepl('Simulated', cohort)) %>%
+  group_by(cohort, id) %>%
+  mutate(rt_2_z = scale(rt_2),
+         rt_2_center = scale(rt_2, center = TRUE, scale = FALSE)) %>%
+  ungroup() %>%
+  group_by(cohort) %>%
+  nest() %>%
+  mutate(model = purrr::map(data, ~brms::brm(data = ., rt_2_center ~ transition + (transition|id),
+                                             cores = 4, chains = 4)),
+         coef = purrr::map(model, ~broom.mixed::tidy(.)))
+
+
+rt_coef = rt_models %>%
+  unnest(coef) %>%
+  dplyr::select(-model, -data)
+
+stage_1_analysis_grid = cowplot::plot_grid(stage1_plta, rt_plot,
+                   nrow = 2, rel_heights = c(1.5, 1))
+
+cowplot::save_plot(stage_1_analysis_grid, filename = 'updated_figures/stage1_plt_grid.png', base_width = 8, base_height = 8)
+
+save(rt_models, rt_coef, file = 'results/rt_models.rda')
+
+rt_coef_table = rt_coef %>%
+  dplyr::filter(effect == 'fixed', term != '(Intercept)') %>%
+  dplyr::select(cohort, term, estimate, conf.low, conf.high) %>%
+   mutate(sig_star = ifelse(conf.low*conf.high > 0, '*', ''),
+         cohort = dplyr::recode(cohort,
+                                         'danl'=' PACCT',
+                                         'decker'='Decker et al. 2016',
+                                         'online'='Nussenbaum et al. 2020',
+                                         'potter'='Potter et al. 2017',
+                                         'Simulated MB'='Simulated Model-Based',
+                                         'Simulated MF'='Simulated Model-Free'),) %>%
+  mutate(`Estimate (95% PI)` = paste0(round(estimate, round_num), ' [', round(conf.low, round_num), ', ',
+                                      round(conf.high, round_num), ']', sig_star)) %>%
+  dplyr::select(Cohort = cohort, `Estimate (95% PI)`) %>%
+  arrange(Cohort) 
+
+
+write.csv(rt_coef_table, file = 'tables/rare_transition_rt_coef_table.csv')
+```
+
+
+
+```{r}
+combined_data_for_models %>%
+  group_by(state_match) %>%
+  count()
+```
+
+

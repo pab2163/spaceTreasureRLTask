@@ -1,0 +1,271 @@
+---
+title: "simulateLearners"
+author: "Paul A. Bloom"
+date: "February 12, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+source('sims_MB.R')
+source('sims_MF.R')
+```
+## Payoffs from task
+
+```{r}
+payoff <- read.csv("rewardProbabilities2019-03-26.csv", stringsAsFactors = F)
+numSubs = 20
+
+payoffLong = gather(payoff, key = 'choice', value = 'prob', 1:4)
+payoff_plot = ggplot(payoffLong, aes(x = trialNum, y = prob, color = choice)) + 
+  geom_line() +
+  theme_bw() +
+  geom_hline(yintercept = .25, lty = 3) +
+  geom_hline(yintercept = .75, lty = 3) +
+  labs(title = 'Payoffs', y = 'Reward Probability')
+
+
+#ggsave(payoff_plot, file = '../../plots/payoff_plot.png', width = 8, height = 4)
+```
+
+## MF Learners
+```{r}
+outFrame = data.frame(alpha1s = rbeta(numSubs, 2.5, 5), 
+                      alpha2s = rbeta(numSubs, 2.5, 5),
+                      itemps = abs(rnorm(numSubs, 5, 2)),
+                      elegibilities = rep(.5, numSubs), # based on Kool et al., 2016
+                      perseverations = runif(numSubs, .01, .2),
+                      transitionContingencies = rep(.7, numSubs),
+                      totalTrials = rep(200, numSubs),
+                      index = 1:numSubs)
+
+outFrame = outFrame %>%
+  group_by(index) %>%
+  mutate(., subframe = oneModelFreeSubject(alpha1 = alpha1s, 
+                                                           alpha2 = alpha2s, 
+                                                           itemp = itemps, 
+                                                           transitionContingency = transitionContingencies, 
+                                                           totalTrials = totalTrials, 
+                                                           perseveration = perseverations,
+                                                           rewardFrame = payoff, 
+                                                           elegibility = elegibilities))
+
+                      
+unnested = outFrame %>%
+  unnest(subframe) %>%
+  filter(., trial !=1) %>%
+  mutate(stay2 = ifelse(choiceStage2 == lag(choiceStage2, 1), 1, 0),
+         stage2_match = ifelse(stateStage2 == lag(stateStage2, 1), 'same', 'different'))
+
+unnested_stage2 = unnested %>%
+  dplyr::filter(!is.na(stay2), prevTransition == 'common') %>%
+  group_by(., index, prevReward, stay, transitionStage2) %>%
+  summarise(n = n(), stay2_prob = sum(stay2)/n())
+
+
+unnested_stage2match = unnested %>%
+  dplyr::filter(!is.na(stay2)) %>%
+  group_by(., index, prevReward, stay, stage2_match) %>%
+  summarise(n = n(), stay2_prob = sum(stay2)/n())
+
+
+
+ggplot(unnested_stage2, aes(x = factor(stay), y = stay2_prob, color = factor(prevReward))) +
+  geom_hline(yintercept = 0.5, lty = 2) +
+  stat_summary(fun.data = mean_cl_boot) +
+  facet_grid(rows = vars(transitionStage2))
+
+ggplot(unnested_stage2match, aes(x = factor(stage2_match), y = stay2_prob, color = factor(prevReward))) +
+  geom_hline(yintercept = 0.5, lty = 2) +
+  stat_summary(fun.data = mean_cl_boot) +
+  facet_grid(rows = vars(stay))
+
+```
+
+
+
+```{r}
+
+
+
+unnestedGrouped = unnested %>%
+  group_by(., prevTransition, prevReward, index) %>%
+  summarise(n = n(), stayProb = sum(stay)/n) %>%
+  ungroup() %>%
+  mutate(., index = factor(index),
+         prevReward = dplyr::recode(prevReward, `0` = 'unrewarded', `1` = 'rewarded'))
+
+
+
+unnestedSpreadCommon = unnestedGrouped %>%
+  dplyr::select(., prevTransition, prevReward,index, stayProb) %>%
+  filter(., prevTransition == 'common') %>%
+  tidyr::spread(., key = prevReward, value = stayProb) %>%
+  mutate(., previousTransition = 'common')
+
+
+unnestedSpreadRare = unnestedGrouped %>%
+  dplyr::select(., prevTransition, prevReward,index, stayProb) %>%
+  filter(., prevTransition == 'rare') %>%
+  tidyr::spread(., key = prevReward, value = stayProb) %>%
+  mutate(., previousTransition = 'rare')
+
+unnestedSpread = rbind(unnestedSpreadCommon, unnestedSpreadRare)
+
+ggplot(unnestedSpread, aes(x =unrewarded, y = rewarded)) +
+  geom_point() + 
+  geom_abline(intercept = 0, slope = 1) + 
+  labs(x = 'p(stay|no reward)', y = 'p(stay|reward)', title = '100 Model-Free Learners') +
+  facet_wrap('previousTransition') +
+  theme_bw() +
+  xlim(0,1) +
+  ylim(0,1)
+
+ggplot(unnestedGrouped, aes(x = prevTransition, y = stayProb, color = index)) + 
+  geom_point(alpha = .2) +
+  geom_line(aes(group=index), alpha = .2) +
+  facet_wrap('prevReward') +
+  stat_summary(fun.data = 'mean_cl_boot', color = 'red', size = .8) +
+  theme_bw() +
+  theme(legend.position="none") +
+  labs(title = 'MF Learners')
+
+
+mfReward = unnested %>%
+  group_by(index) %>%
+  summarise(rewardProb = sum(rewardStage2)/n()) %>%
+  mutate(., learnerType = 'model-free')
+
+unnestedGrouped = mutate(unnestedGrouped, 
+                         prevReward= ifelse(prevReward == 'rewarded', 'Prev. Trial Reward', ' Prev. Trial No Reward'))
+
+sim_model_free_stays = ggplot(unnestedGrouped, aes(x = prevTransition, y = stayProb)) + 
+  geom_hline(yintercept = .5, lty =2) +
+  facet_wrap('prevReward') +
+  stat_summary(fun.data = 'mean_cl_boot', size = .8, color= 'purple4') +
+  theme_bw() +
+  theme(legend.position="none") +
+  labs(title = '500 Simulated Model-Free Learners', 
+       y = 'P(Stage 1 Stay)',
+       x = 'Prev. Trial Transition') +
+  theme(text = element_text(face = 'bold'))
+
+#ggsave(sim_model_free_stays, file = '../../plots/simulations/sim_model_free_stays.pdf', height = 4, width =6)
+```
+
+
+## MB Learners
+```{r}
+
+outFrame = data.frame(alphas = rbeta(numSubs, 4, 5),
+                      itemps = abs(rnorm(numSubs, 3.6, 2)),# based on Daw et al., 2011
+                      perseverations = runif(numSubs, .01, .2), # based on Daw et al., 2011
+                      elegibilities = rep(.5, numSubs), # based on Kool et al., 2016
+                      transitionContingencies = rep(.7, numSubs),
+                      totalTrials = rep(200, numSubs),
+                      index = 1:numSubs)
+
+
+a = oneModelBasedSubject(alpha = .5, itemp = 5, transitionContingency = .7, totalTrials = 200, rewardFrame = payoff, perseveration = .11)
+
+outFrame = outFrame %>%
+  group_by(index) %>%
+  mutate(., subframe = oneModelBasedSubject(alpha = alphas, 
+                                                           itemp = itemps, 
+                                                           transitionContingency = transitionContingencies, 
+                                                           totalTrials = totalTrials, 
+                                                           perseveration = perseverations,
+                                                           rewardFrame = payoff))
+
+                      
+unnested = outFrame %>%
+  unnest(subframe) %>%
+  filter(., trial !=1) 
+
+
+unnestedGrouped = unnested %>%
+  group_by(., prevTransition, prevReward, index) %>%
+  summarise(n = n(), stayProb = sum(stay)/n) %>%
+  ungroup() %>%
+  mutate(., index = factor(index),
+         prevReward = dplyr::recode(prevReward, `0` = 'unrewarded', `1` = 'rewarded'))
+
+unnestedSpreadCommon = unnestedGrouped %>%
+  dplyr::select(., prevTransition, prevReward,index, stayProb) %>%
+  filter(., prevTransition == 'common') %>%
+  tidyr::spread(., key = prevReward, value = stayProb) %>%
+  mutate(., previousTransition = 'common')
+
+
+unnestedSpreadRare = unnestedGrouped %>%
+  dplyr::select(., prevTransition, prevReward,index, stayProb) %>%
+  filter(., prevTransition == 'rare') %>%
+  tidyr::spread(., key = prevReward, value = stayProb) %>%
+  mutate(., previousTransition = 'rare')
+
+unnestedSpread = rbind(unnestedSpreadCommon, unnestedSpreadRare)
+
+
+ggplot(unnestedSpread, aes(x =unrewarded, y = rewarded)) +
+  geom_point() + 
+  geom_abline(intercept = 0, slope = 1) + 
+  labs(x = 'p(stay|no reward)', y = 'p(stay|reward)', title = '100 Model-Based Learners') +
+  facet_wrap('previousTransition') +
+  theme_bw()
+
+
+ggplot(unnestedGrouped, aes(x = prevTransition, y = stayProb, color = index)) + 
+  geom_point(alpha = .2) +
+  geom_line(aes(group=index), alpha = .2) +
+  facet_wrap('prevReward') +
+  stat_summary(fun.data = 'mean_cl_boot', color = 'red', size = .8) +
+  theme_bw() +
+  theme(legend.position="none") +
+  labs(title = 'MB Learners')
+
+mbReward = unnested %>%
+  group_by(index) %>%
+  summarise(rewardProb = sum(rewardStage2)/n()) %>%
+  mutate(., learnerType = 'model-based')
+
+
+
+unnestedGrouped = mutate(unnestedGrouped, 
+                         prevReward= ifelse(prevReward == 'rewarded', 'Prev. Trial Reward', ' Prev. Trial No Reward'))
+
+sim_model_based_stays = ggplot(unnestedGrouped, aes(x = prevTransition, y = stayProb)) + 
+  geom_hline(yintercept = .5, lty =2) +
+  facet_wrap('prevReward') +
+  stat_summary(fun.data = 'mean_cl_boot', size = .8, color= 'purple4') +
+  theme_bw() +
+  theme(legend.position="none") +
+  labs(title = '500 Simulated Model-Based Learners', 
+       y = 'P(Stage 1 Stay)',
+       x = 'Prev. Trial Transition') +
+  theme(text = element_text(face = 'bold'))
+
+sim_model_based_stays
+
+#ggsave(sim_model_based_stays, file = '../../plots/simulations/sim_model_based_stays.pdf', height = 4, width =6)
+```
+
+```{r}
+sim_grid = cowplot::plot_grid(sim_model_free_stays, sim_model_based_stays)
+cowplot::save_plot('sim_grid.png', sim_grid, base_width = 12, base_height = 6)
+```
+
+## Difference in reward rate between MF/MB??
+
+```{r}
+source("https://gist.githubusercontent.com/benmarwick/2a1bb0133ff568cbe28d/raw/fb53bd97121f7f9ce947837ef1a4c65a73bffb3f/geom_flat_violin.R")
+rewardFrame = rbind(mbReward, mfReward)
+
+ggplot(rewardFrame, aes(x = learnerType, y = rewardProb)) +
+  geom_jitter(width = .05) +
+  geom_flat_violin(aes(fill = learnerType), position = position_nudge(x = .1, y = 0), alpha = .7) +
+  stat_summary(fun.data = 'mean_cl_boot', position = position_nudge(x =.2)) +
+  theme_bw() +
+  labs(title = 'Difference in overall reward rates between MB/MF learners?')
+  
+```

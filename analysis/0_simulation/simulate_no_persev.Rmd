@@ -1,0 +1,192 @@
+---
+title: "simulateLearners"
+author: "Paul A. Bloom"
+date: "February 12, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+source('sims_MB.R')
+source('sims_MF.R')
+```
+## Payoffs from task
+
+```{r}
+payoff = read.csv("rewardProbabilities2019-03-26.csv", stringsAsFactors = F)
+numSubs = 100
+set.seed(1)
+
+
+payoffLong = gather(payoff, key = 'choice', value = 'prob', 1:4)
+payoff_plot = ggplot(payoffLong, aes(x = trialNum, y = prob, color = choice)) + 
+  geom_line() +
+  theme_bw() +
+  geom_hline(yintercept = .25, lty = 3) +
+  geom_hline(yintercept = .75, lty = 3) +
+  labs(title = 'Payoffs', y = 'Reward Probability')
+
+
+#ggsave(payoff_plot, file = '../../plots/payoff_plot.png', width = 8, height = 4)
+```
+
+## MF Learners
+```{r}
+sim_mf = data.frame(alpha1s = rbeta(numSubs, 2.5, 5), 
+                      alpha2s = rbeta(numSubs, 2.5, 5),
+                      itemps = abs(rnorm(numSubs, 5, 2)),
+                      elegibilities = rep(.5, numSubs), # based on Kool et al., 2016
+                      perseverations = runif(numSubs, .01, .1), # based on Daw et al., 2011
+                      transitionContingencies = rep(.7, numSubs),
+                      totalTrials = rep(200, numSubs),
+                      index = 1:numSubs)
+
+sim_mf = sim_mf %>%
+  group_by(index) %>%
+  mutate(., subframe = oneModelFreeSubject(alpha1 = alpha1s, 
+                                                           alpha2 = alpha2s, 
+                                                           itemp = itemps, 
+                                                           transitionContingency = transitionContingencies, 
+                                                           totalTrials = totalTrials, 
+                                                           perseveration = perseverations,
+                                                           rewardFrame = payoff, 
+                                                           elegibility = elegibilities))
+
+unnested_mf = sim_mf %>%
+  unnest(subframe)
+```
+
+
+## MB Learners
+```{r}
+sim_mb = data.frame(alphas = rbeta(numSubs, 2.5, 5),
+                      itemps = abs(rnorm(numSubs, 5, 2)),# based on Daw et al., 2011
+                      perseverations = runif(numSubs, .01, .1),
+                      elegibilities = rep(.5, numSubs), # based on Kool et al., 2016
+                      transitionContingencies = rep(.7, numSubs),
+                      totalTrials = rep(200, numSubs),
+                      index = 1:numSubs)
+
+sim_mb = sim_mb %>%
+  group_by(index) %>%
+  mutate(., subframe = oneModelBasedSubject(alpha = alphas, 
+                                                           itemp = itemps, 
+                                                           transitionContingency = transitionContingencies, 
+                                                           totalTrials = totalTrials, 
+                                                           perseveration = perseverations,
+                                                           rewardFrame = payoff))
+
+unnested_mb = sim_mb %>% 
+  unnest(subframe) 
+```
+
+# Save data out
+
+```{r}
+save(unnested_mb, unnested_mf, file = '../../clean_data/sims_no_persev.rda')
+```
+
+# Checking
+
+
+```{r}
+mb_match_check = 
+  unnested_mb %>%
+  group_by(index) %>%
+  mutate(button_match = ifelse(lag(choiceStage2, n=1) == stage1Choice, TRUE, FALSE)) 
+
+
+mb_match_summary= mb_match_check%>%
+  group_by(index, prevReward) %>%
+  summarise(match_prob = sum(button_match)/n())
+
+
+diff = mb_match_summary %>%
+  pivot_wider(id_cols  = index, names_from = prevReward, values_from=match_prob) %>%
+  mutate(diff = `1`-`0`)
+
+ggplot(mb_match_summary, aes(x = as.factor(prevReward), y = match_prob)) +
+  stat_summary(fun.data = mean_cl_boot) +
+  geom_line(aes(group = index), alpha = 0.1)
+
+
+pcheck = unnested_mb %>%
+  dplyr::filter(trial==1)
+
+
+pcheck = left_join(pcheck, diff, by = 'index')
+
+
+
+cor_l = mb_match_check %>%
+  group_by(index) %>%
+  summarise(lcor = cor(smxL1, smxL2))
+
+
+pcheck = left_join(pcheck, cor_l, by = 'index')
+
+
+ggplot(pcheck, aes(x = lcor, y = diff)) +
+  geom_point()
+
+summary(pcheck$lcor)
+```
+
+
+```{r}
+
+m  = lme4::glmer(data = dplyr::filter(mb_match_check), button_match ~ prevReward + (prevReward|index),
+                 family = binomial(link = 'logit'))
+
+
+summary(m)
+
+```
+```{r}
+
+# shahar_analysis= combined_data_for_models %>%
+#   group_by(id) %>%
+#   mutate(next_match_button = lag(choice_2)==choice_1) %>%
+#   ungroup()
+#   
+seq_analysis_raw_summary = combined_data_for_models %>%
+  group_by(cohort, id, last_reward) %>%
+  summarise(next_match_button_prob = sum(next_match_button, na.rm = TRUE)/n()) %>%
+  dplyr::mutate(last_reward = dplyr::recode(last_reward, '1'='Reward', '0'='No Reward'))
+
+
+# ggplot(seq_analysis_raw_summary, aes(x = cohort, y = next_match_button_prob, color = factor(last_reward))) +
+#   stat_summary(fun.data = mean_cl_boot, position = position_dodge(0.2)) +
+#   labs(x = 'Cohort', y = 'P(Current stage 1 button = last trial stage 2 button)', color = 'Last trial outcome') +
+#   geom_hline(yintercept = 0.5, lty = 2)
+
+
+shahar_models = combined_data_for_models %>%
+  group_by(cohort) %>%
+  nest() %>%
+  mutate(mod = map(data, ~lme4::glmer(data = ., next_match_button ~ last_reward + (last_reward | id), family = binomial(link = 'logit'))))
+
+
+shahr_coefs = shahar_models %>%
+  mutate(coef = map(mod, ~broom.mixed::tidy(., conf.int=TRUE))) %>%
+  dplyr::select(-mod, -data) %>%
+  unnest(coef)
+
+
+shahr_coefs %>%
+  dplyr::filter(term == 'last_reward') %>%
+  ggplot(aes(y = cohort, x = estimate)) +
+  geom_vline(xintercept =0, lty = 2, color = 'red') +
+  geom_point() +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0) +
+  labs(x = 'Estimated effect of previous trial reward on button match', y =  'Cohort')
+
+
+ggplot(seq_analysis_raw_summary, aes(x = last_reward, y = next_match_button_prob)) +
+  stat_summary(fun.data = mean_cl_boot, position = position_dodge(0.2), aes(color = factor(last_reward))) +
+  facet_grid(~cohort) +
+  geom_line(aes(group = interaction(id, cohort)), alpha = 0.1) +
+  labs(x = 'Cohort', y = 'P(Current stage 1 button = last trial stage 2 button)', color = 'Last trial outcome') +
+  geom_hline(yintercept = 0.5, lty = 2)
+```

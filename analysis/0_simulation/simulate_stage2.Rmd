@@ -1,0 +1,118 @@
+---
+title: "simulateLearners"
+author: "Paul A. Bloom"
+date: "February 12, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+source('sims_MB.R')
+source('sims_MF.R')
+```
+## Payoffs from task
+
+```{r}
+payoff <- read.csv("rewardProbabilities2019-03-26.csv", stringsAsFactors = F)
+numSubs = 100
+
+payoffLong = gather(payoff, key = 'choice', value = 'prob', 1:4)
+payoff_plot = ggplot(payoffLong, aes(x = trialNum, y = prob, color = choice)) + 
+  geom_line() +
+  theme_bw() +
+  geom_hline(yintercept = .25, lty = 3) +
+  geom_hline(yintercept = .75, lty = 3) +
+  labs(title = 'Payoffs', y = 'Reward Probability')
+
+
+#ggsave(payoff_plot, file = '../../plots/payoff_plot.png', width = 8, height = 4)
+```
+
+## MF Learners
+```{r}
+sim_mf = data.frame(alpha1s = rbeta(numSubs, 2.5, 5), 
+                      alpha2s = rbeta(numSubs, 2.5, 5),
+                      itemps = abs(rnorm(numSubs, 5, 2)),
+                      elegibilities = rep(.5, numSubs), # based on Kool et al., 2016
+                      perseverations = runif(numSubs, .01, .2),
+                      transitionContingencies = rep(.7, numSubs),
+                      totalTrials = rep(200, numSubs),
+                      index = 1:numSubs)
+
+sim_mf = sim_mf %>%
+  group_by(index) %>%
+  mutate(., subframe = oneModelFreeSubject(alpha1 = alpha1s, 
+                                                           alpha2 = alpha2s, 
+                                                           itemp = itemps, 
+                                                           transitionContingency = transitionContingencies, 
+                                                           totalTrials = totalTrials, 
+                                                           perseveration = perseverations,
+                                                           rewardFrame = payoff, 
+                                                           elegibility = elegibilities))
+
+                      
+unnested_mf = sim_mf %>%
+  unnest(subframe) %>%
+  mutate(stay2 = ifelse(choiceStage2 == lag(choiceStage2, 1), 1, 0),
+         stage2_match = ifelse(stateStage2 == lag(stateStage2, 1), 'Same Planet', 'Different Planet'))
+
+
+unnested_stage2match_mf = unnested_mf %>%
+  dplyr::filter(!is.na(stay2)) %>%
+  group_by(., index, prevReward, stage2_match) %>%
+  summarise(n = n(), stay2_prob = sum(stay2)/n()) %>%
+  mutate(type = 'Model-Free')
+```
+
+
+## MB Learners
+```{r}
+sim_mb = data.frame(alphas = rbeta(numSubs, 4, 5),
+                      itemps = abs(rnorm(numSubs, 5, 2)),# based on Daw et al., 2011
+                      perseverations = runif(numSubs, .01, .2), # based on Daw et al., 2011
+                      elegibilities = rep(.5, numSubs), # based on Kool et al., 2016
+                      transitionContingencies = rep(.7, numSubs),
+                      totalTrials = rep(200, numSubs),
+                      index = 1:numSubs)
+
+sim_mb = sim_mb %>%
+  group_by(index) %>%
+  mutate(., subframe = oneModelBasedSubject(alpha = alphas, 
+                                                           itemp = itemps, 
+                                                           transitionContingency = transitionContingencies, 
+                                                           totalTrials = totalTrials, 
+                                                           perseveration = perseverations,
+                                                           rewardFrame = payoff))
+
+                      
+unnested_mb = sim_mb %>% 
+  unnest(subframe) %>%
+  mutate(stay2 = ifelse(choiceStage2 == lag(choiceStage2, 1), 1, 0),
+         stage2_match = ifelse(stateStage2 == lag(stateStage2, 1), 'Same Planet', 'Different Planet'))
+
+
+unnested_stage2match_mb = unnested_mb %>%
+  dplyr::filter(!is.na(stay2)) %>%
+  group_by(., index, prevReward, stage2_match) %>%
+  summarise(n = n(), stay2_prob = sum(stay2)/n()) %>%
+  mutate(type = 'Model-Based')
+
+
+stage2_match_both = rbind(unnested_stage2match_mb, unnested_stage2match_mf) %>%
+  mutate(prevReward = dplyr::recode(prevReward, '1'='Prev. Trial Reward', '0'='Prev. Trial No Reward'))
+
+
+save(unnested_mb, unnested_mf, file = '../../clean_data/sims.rda')
+
+
+ggplot(stage2_match_both, aes(x = factor(stage2_match), y = stay2_prob, color = prevReward)) +
+  geom_hline(yintercept = 0.5, lty = 2) +
+  stat_summary(fun.data = mean_cl_boot, position = position_dodge(0.2)) +
+  facet_grid(cols = vars(type)) +
+  labs(x = 'stage 2 state compared to previous trial', y = 'P(stage 2 stay)\nsame stage 2 button press as previous trial', 
+       prevReward = NULL)
+
+
+
+```

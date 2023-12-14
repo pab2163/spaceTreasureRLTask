@@ -1,0 +1,83 @@
+---
+title: "explicit_responses"
+author: "Paul Bloom"
+date: "6/4/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(Matrix)
+library(tidyverse)
+```
+
+```{r}
+e = read.csv('../clean_data/danl_space_treasure_comps.csv')
+
+
+strat = unique(e$strategyResponse)
+
+strategies = sub(".*\\?", "", strat) %>%
+  trimws() %>%
+  unique()
+
+
+
+d = data.frame(strategies = strategies) %>%
+  dplyr::filter(!strategies %in% c('n/a'), !is.na(strategies)) 
+
+write.csv(d, file = 'tables/participant_explicit_strategies.csv', row.names = FALSE)
+```
+
+
+```{r}
+explicit_summary = e %>%
+  dplyr::mutate(., yellowCorrect = case_when(
+    yellowPortalDestResp == 'r' & grepl('green', color0) ~ 1,
+    yellowPortalDestResp == 'l' & grepl('green', color0) ~ 0,
+    yellowPortalDestResp == 'r' & grepl('green', color1) ~ 0,
+    yellowPortalDestResp == 'l' & grepl('green', color1) ~ 1
+    ),
+    greenCorrect = case_when(
+      greenPortalDestResp == 'r' & grepl('green', color0) ~ 0,
+      greenPortalDestResp == 'l' & grepl('green', color0) ~ 1,
+      greenPortalDestResp == 'r' & grepl('green', color1) ~ 1,
+      greenPortalDestResp == 'l' & grepl('green', color1) ~ 0
+    )
+  ) %>%
+  group_by(id, age, group) %>%
+  summarise(
+    portal_l_c = ifelse(stage2Type1PortalResp[1] == 'l', 1, 0),
+    portal_r_c = ifelse(stage2Type2PortalResp[1] == 'r', 1, 0),
+    ladder_response_c = ifelse(ladderResponse[1] == 'l', 1, 0),
+    yellow_resp_c = yellowCorrect[1],
+    green_resp_c = greenCorrect[1]
+  )
+
+
+cor(dplyr::select(explicit_summary, -participantID))
+
+explicit_correct_plot = explicit_summary %>%
+  dplyr::filter(age >= 8) %>%
+  dplyr::select(-contains('portal')) %>%
+  tidyr::pivot_longer(., cols = contains('_c'), names_to = 'question') %>%
+  dplyr::mutate(question = dplyr::recode(question, 'yellow_resp_c'='Which planet does the yellow portal usually go to?',
+                                                   'green_resp_c'='Which planet does the green portal usually go to?',
+                                                  'ladder_response_c'='Which type of ladder did you see more often?')) %>%
+  group_by(question) %>%
+  summarise(prop = sum(value)/n(), se = sqrt(prop*(1-prop)/n())) %>%
+  ggplot(., aes(x = question, y = prop)) +
+    geom_hline(yintercept = 0.5, lty= 2) +
+    geom_point() + 
+    geom_errorbar(aes(ymin = prop - 2*se, ymax = prop + 2*se), width = 0) +
+    geom_text(aes(label = round(prop, 3)), position = position_nudge(x = 0.1, y = 0)) +
+    theme_bw() +
+    ylim(0.25,1) +
+    labs(y = 'Proportion of Participants Answering Correctly',
+         title = 'Adapted Paradigm\nPost-task questions on transition structure',
+         x = NULL) +
+  coord_flip()
+
+ggsave(explicit_correct_plot, filename = 'updated_figures/supplement/explicit_questions_correct_plot.png',
+       height = 4, width = 7)
+```

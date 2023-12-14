@@ -1,0 +1,139 @@
+---
+title: "3_stage_2_analyses"
+author: "Paul Bloom"
+date: "1/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Matrix)
+library(tidyverse)
+library(lme4)
+library(brms)
+library(broom.mixed)
+library(sjPlot)
+library(tidybayes)
+library(cowplot)
+library(readxl)
+theme_set(theme_bw())
+```
+
+```{r}
+task = read_csv('../clean_data/danl_space_treasure_comps.csv') %>%
+  group_by(id, age) %>%
+  count() %>%
+  mutate(age = round(age, 3))
+
+danl = readxl::read_xlsx('../rawDemog/MASTER_W2_20200417.xlsx')
+
+danl = dplyr::filter(danl, GROUP == 'C') %>%
+  dplyr::select(IDENT_SUBID, GROUP, age = SUBAGE_Session2, SCHOOLGRADE, contains('DEM'), contains('ITN'), contains('INC')) %>%
+  mutate(id = parse_number(IDENT_SUBID),
+         age = round(age, 3))
+
+
+task = dplyr::left_join(task, danl, by = c('id', 'age'))
+
+summary(task$INC_ITN_HOUSE)
+sd(task$INC_ITN_HOUSE, na.rm = TRUE)
+
+
+task = dplyr::filter(task, age >= 8)
+```
+
+# Age
+
+```{r}
+age_hist = ggplot(task, aes(x = age)) +
+  geom_histogram(fill = 'purple', alpha = 0.7, binwidth = 1) +
+  scale_x_continuous(breaks = 7:14) +
+  labs(x = 'Age', y = 'Count')
+
+ggsave(age_hist, filename = '../manuscript_comps/main_figures/age_histogram.png', height = 4, width = 4)
+```
+
+# Gender
+
+```{r}
+#0 = Male; 1 = Female
+table(task$DEM_3_GENDER_CHILD, useNA = 'ifany')
+
+# PA028 = 0, PA029 = 1, PA141 = 0
+```
+
+# Race
+```{r}
+race_table = task %>%
+  pivot_longer(c(DEM_4A_RACE_CHILD_AIAN, 
+                 DEM_4A_RACE_CHILD_AAB, 
+                 DEM_4A_RACE_CHILD_NHOPI, 
+                 DEM_4A_RACE_CHILD_AA, 
+                 DEM_4A_RACE_CHILD_OTHER,
+                 DEM_4A_RACE_CHILD_EAC)) %>%
+  group_by(name) %>%
+  mutate(name = dplyr::recode(name, 
+                              'DEM_4A_RACE_CHILD_AIAN'='American Indian/Alaska Native', 
+                             'DEM_4A_RACE_CHILD_AAB'='African American/Black', 
+                             'DEM_4A_RACE_CHILD_NHOPI'='Native Hawaiian/Other Pacific Islander', 
+                             'DEM_4A_RACE_CHILD_AA'='Asian American', 
+                             'DEM_4A_RACE_CHILD_OTHER'='Other',
+                             'DEM_4A_RACE_CHILD_EAC'='European-American/Caucasian'
+                              )) %>%
+  summarise(n = sum(value, na.rm = TRUE), 
+            prop = paste0(round(n/nrow(task)*100, 1), '%')) %>%
+  dplyr::select(Race = name, everything()) %>%
+  dplyr::arrange(-n)
+
+write.csv(race_table, file = 'tables/race.csv')
+
+sjPlot::tab_df(race_table,file =  '../manuscript_comps/tables/race.doc')
+
+
+
+race_other_table = task %>%
+  group_by(DEM_4A_RACE_CHILD_OTHER_EXPLAIN) %>%
+  count() %>%
+  dplyr::select(`Parent-reported child race`=DEM_4A_RACE_CHILD_OTHER_EXPLAIN, everything()) %>%
+  dplyr::filter(!is.na(`Parent-reported child race`)) %>%
+  dplyr::arrange(-n) %>%
+  dplyr::mutate(`Parent-reported child race` = stringr::str_to_title(`Parent-reported child race`))
+
+write.csv(race_other_table, file = 'tables/race_other.csv')
+
+sjPlot::tab_df(race_other_table,file =  '../manuscript_comps/tables/race_other.doc')
+
+```
+
+
+```{r}
+table(task$DEM_4B_ETHN_CHILD_HISLAT, useNA= 'ifany')
+```
+
+
+```{r}
+w1 = readxl::read_xlsx('../rawDemog/MASTER_W2_20200417.xlsx')
+
+
+l = dplyr::select(w1, contains('SS'))
+
+mj = read_csv('../rawDemog/MJ_MASTER_W1_20210223.csv')
+
+
+mj = mutate(mj, creabin = ifelse(GROUP == 'C', 'comp', 'crEA'))
+
+ggplot(mj, aes(x = GROUP, y = SS_NEW_TOTAL_SUM.J)) +
+  geom_boxplot() +
+  stat_summary(fun.data = mean_cl_boot)
+
+ggplot(mj, aes(x = creabin, y = SS_NEW_TOTAL_SUM.J)) +
+  #geom_boxplot() +
+  stat_summary(fun.data = mean_cl_boot)
+
+h = lm(data = mj, SS_NEW_TOTAL_SUM.J ~ age_t)
+
+summary(h)
+```
