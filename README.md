@@ -1,4 +1,4 @@
-# Space Treausre RL Task
+# Space Treasure RL Task
 
 Author: Paul A. Bloom
 
